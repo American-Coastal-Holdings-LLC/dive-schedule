@@ -1,0 +1,144 @@
+// Dive Schedule — vendor-owned database. This app owns its schema and migrations outright
+// (it is NOT the platform's DB). Every row is keyed by installationId so that a per-installation
+// delete (uninstall / kill-switch) is one cascade. Calendar dates (dueDate, ledger date, joined)
+// are stored as 'YYYY-MM-DD' strings and interpreted in the tenant timezone by the app; instants
+// (completedAt, sentAt, ...) are true DateTime. Money and lengths are Decimal.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Installation {
+  id          String   @id
+  tenantId    String
+  status      String   @default("active") // active | uninstalled
+  installedAt DateTime @default(now())
+
+  settings InstallationSettings?
+
+  @@index([tenantId])
+}
+
+model InstallationSettings {
+  installationId       String  @id
+  payRate              Decimal @default(0.5)
+  reportCcEmail        String  @default("")
+  estimateRatePerFoot  Decimal @default(0)
+
+  installation Installation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+}
+
+model CrewProfile {
+  installationId String
+  userId         String
+  certifications String @default("")
+  bio            String @default("")
+  photo          String @default("") // data:image/... or ""
+  joined         String @default("") // YYYY-MM-DD
+
+  @@id([installationId, userId])
+  @@index([installationId])
+}
+
+model Job {
+  id             String    @id @default(cuid())
+  installationId String
+  site           String    @default("")
+  boat           String    @default("")
+  ownerName      String    @default("")
+  customerEmail  String    @default("")
+  footage        Decimal   @default(0)
+  price          Decimal   @default(0)
+  rotation       String    @default("weekly") // weekly | biweekly | monthly | bimonthly
+  dueDate        String    @default("") // YYYY-MM-DD
+  status         String    @default("open") // open | completed
+  notes          String    @default("")
+  videos         Json      @default("[]") // [{ title, url }]
+  assignedUserIds Json     @default("[]") // string[] of platform user ids
+  completedBy    String?
+  completedByName String?
+  completedAt    DateTime?
+  completionNote String    @default("")
+  completionPhoto String   @default("")
+  checkAnswers   Json      @default("[]") // [{ id, q, a }]
+  certified      Boolean   @default(false)
+  certifiedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([installationId])
+  @@index([installationId, status])
+}
+
+model ServiceRecord {
+  id              String    @id @default(cuid())
+  installationId  String
+  jobId           String
+  site            String    @default("")
+  boat            String    @default("")
+  ownerName       String    @default("")
+  customerEmail   String    @default("")
+  diverNames      String    @default("")
+  completedBy     String?
+  completedByName String?
+  completedAt     DateTime?
+  rotation        String    @default("weekly")
+  price           Decimal   @default(0)
+  footage         Decimal   @default(0)
+  note            String    @default("")
+  photo           String    @default("")
+  certified       Boolean   @default(false)
+  certifiedAt     DateTime?
+  answers         Json      @default("[]") // [{ q, a }]
+  sent            Boolean   @default(false)
+  sentAt          DateTime?
+  sentTo          String    @default("")
+  createdAt       DateTime  @default(now())
+
+  @@index([installationId])
+  @@index([installationId, jobId])
+  @@index([installationId, sent])
+}
+
+model ChecklistQuestion {
+  id             String @id @default(cuid())
+  installationId String
+  text           String @default("")
+  ord            Int    @default(0)
+
+  @@index([installationId])
+}
+
+model InventoryItem {
+  id             String  @id @default(cuid())
+  installationId String
+  name           String  @default("")
+  type           String  @default("item") // item | part | tool
+  quantity       Int     @default(0)
+  unitCost       Decimal @default(0)
+  salePrice      Decimal @default(0)
+  sku            String  @default("")
+  lowStockAt     Int     @default(0)
+  notes          String  @default("")
+
+  @@index([installationId])
+  @@index([installationId, type])
+}
+
+model LedgerEntry {
+  id             String  @id @default(cuid())
+  installationId String
+  kind           String  @default("in") // in | out
+  amount         Decimal @default(0)
+  description    String  @default("")
+  category       String  @default("")
+  date           String  @default("") // YYYY-MM-DD
+
+  @@index([installationId])
+  @@index([installationId, date])
+}

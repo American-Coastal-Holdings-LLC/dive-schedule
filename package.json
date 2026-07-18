@@ -1,15 +1,11 @@
 {
   "name": "dive-schedule",
   "private": true,
-  "workspaces": [
-    "server",
-    "web"
-  ],
   "scripts": {
-    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"npm run dev -w web\"",
-    "build": "npm run build -w server && npm run build -w web",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
-    "seed": "npm run seed -w server"
+    "dev": "concurrently -n api,web -c blue,green \"npm --prefix api run start:dev\" \"npm --prefix web run dev\"",
+    "build": "npm --prefix api run build && npm --prefix web run build",
+    "typecheck": "npm --prefix api run typecheck && npm --prefix web run typecheck",
+    "seed": "npm --prefix api run seed"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

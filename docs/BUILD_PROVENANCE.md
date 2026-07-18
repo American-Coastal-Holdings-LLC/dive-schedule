@@ -26,15 +26,88 @@ Built directly in the Opus main loop (foundation):
   `installationId`) — hand-written by Opus, migrated against `dive_schedule_dev`.
 - `legacy/reference/` extracts (CSS + domain functions) — verbatim from the seed, for porting.
 
-Built by Opus workflow agents (`.build/build-workflow.mjs`) — pending at time of writing:
-- `api/` source — auth (dev-stub identity, guards, 19 perms, 5 dev users), Prisma service,
-  modules/routes per the API table, ported domain logic, webhooks, platform stubs, seed.
-- `web/` source — bridge, api client, PermissionsProvider, the 7 tabs, `/harness`.
-- Integration fixes, `README.md`, this file's gate results.
+Built by Opus workflow agents (`.build/build-workflow.mjs`), then integrated live:
 
-Self-tests run on Opus (NOT a substitute for review): typecheck + build on both halves, plus a
-live cross-stack smoke suite (see `docs/ARCHITECTURE.md` API table / workflow script for the
-exact items). Passing gates are recorded in the final report, not here.
+**`api/` source (NestJS + Prisma)** — auth (dev-stub identity, guards, 19 perms, 5 dev users),
+Prisma service + tenancy cascade, all modules/routes per the API table with the exact
+enforcement points, domain logic ported from `legacy/reference/seed-domain-logic.js`, webhooks,
+platform stubs, and `prisma/seed.ts`:
+
+```
+api/src/main.ts  app.module.ts
+api/src/auth/           auth.module.ts current-identity.decorator.ts dev-stub.provider.ts
+                        dev-users.ts identity.guard.ts identity.ts permissions.guard.ts
+                        permissions.ts public.decorator.ts require-permissions.decorator.ts
+api/src/common/         all-exceptions.filter.ts api-error.ts
+api/src/db/             prisma.module.ts prisma.service.ts tenancy.service.ts
+api/src/domain/         dates.ts finance-calc.ts record-builder.ts serialize.ts
+api/src/platform/       directory.ts platform.module.ts tenant.ts
+api/src/health/         health.controller.ts
+api/src/me/             me.controller.ts
+api/src/jobs/           jobs.controller.ts jobs.dto.ts jobs.module.ts jobs.service.ts
+api/src/records/        records.controller.ts records.dto.ts records.module.ts records.service.ts
+api/src/checklist/      checklist.controller.ts checklist.dto.ts checklist.module.ts checklist.service.ts
+api/src/crew/           crew.controller.ts crew.dto.ts crew.module.ts crew.service.ts
+api/src/pay/            pay.controller.ts pay.dto.ts pay.module.ts pay.service.ts
+api/src/inventory/      inventory.controller.ts inventory.dto.ts inventory.module.ts inventory.service.ts
+api/src/finance/        finance.controller.ts finance.dto.ts finance.module.ts finance.service.ts
+                        ledger.controller.ts settings.controller.ts pos.controller.ts backup.controller.ts
+api/src/webhooks/       webhook-verifier.ts webhooks.controller.ts webhooks.module.ts
+api/scripts/devtoken.mjs   api/prisma/seed.ts   api/prisma/schema.prisma
+```
+
+**`web/` source (Next.js App Router, TS, `src/`)** — bridge, api client, PermissionsProvider +
+PlatformProvider, the 7 tabs and their modals ported with the seed CSS, and the `/harness`:
+
+```
+web/src/app/            layout.tsx page.tsx harness/page.tsx globals.css
+web/src/components/      Icon.tsx Modal.tsx Shell.tsx common.tsx
+                         PermissionsProvider.tsx PlatformProvider.tsx
+web/src/components/tabs/  JobsTab RecordsTab ChecksTab PayTab DiversTab SalesTab StockTab (.tsx)
+web/src/components/modals/ JobDetailModal JobFormModal RecordModal DiverModal PosModal
+                           StockFormModal LedgerFormModal (.tsx)
+web/src/lib/             api.ts format.ts hooks.ts permissions.ts photo.ts types.ts
+web/src/lib/platform/    bridge.ts dev-users.ts
+```
+
+### Final gate results (this Opus session — self-tested, NOT a Fable review)
+
+| Gate | Result |
+|---|---|
+| api `npm run typecheck` | **pass** |
+| api `npm run build` (nest build) | **pass** |
+| api `npm run seed` (both installations) | **pass** — 8 jobs, 2 records, 10 inventory, 10 ledger |
+| web `npm run typecheck` | **pass** |
+| web `npm run build` (5 pages generated, 0 warnings) | **pass** |
+| Next proxy `/api/me` via 4311 → API 4310 | **pass** |
+| Full cross-stack smoke suite (items a–j) | **pass** — all 10 |
+
+Smoke items verified live against the running stack: (a) `me` for dana/riley + 401 on
+garbage/no token; (b) riley sees only his 4 assigned jobs, no `price` key, unassigned id +
+its sub-routes → 404; (c) dana sees all 6 `inst_demo` jobs with prices; (d) olga sees only her
+2 `inst_other` jobs (tenant isolation); (e) riley current-week pay nonzero, `?userId=usr_dana`
+→ 403, same as sam → 200; (f) full lifecycle create → answers → certify → complete → record →
+send (marks sent, returns mailto, writes customerEmail back to job) → answers on sent job leaves
+the frozen record unchanged → reopen advances dueDate per rotation + clears completion/answers/
+certify; (g) casey POS sale writes one `POS · Cash` ledger `in` + atomically decrements stock,
+casey pay → 403; (h) `installation.uninstalled` with `X-Dev-Signature: dev` cascade-deletes a
+scratch installation across **all 7 tables** (verified by direct SQL count), wrong signature →
+401; (i) casey records carry no `price`, sam's do; (j) casey finance summary returns
+week/month/year + 6-month trend, riley → 403.
+
+### Integration fix applied during this session
+
+- **`assignedUsers` vs `assignedCrew` field mismatch (web ↔ api).** The web job-detail modal
+  reads `job.assignedUsers[]` to render assigned-crew names, but the API serialized the resolved
+  `{id,name}` list only under `assignedCrew`, so names never rendered in the detail view. The
+  spec (`docs/ARCHITECTURE.md`) does not fix the field name. Fixed on the **api** side
+  (`api/src/domain/serialize.ts`): the resolved list is now emitted under **both** `assignedUsers`
+  (what the web reads) and `assignedCrew` (the documented API alias).
+- **Dev-user id mismatch (web harness ↔ api/seed).** `web/src/lib/platform/dev-users.ts` set the
+  token `sub` to the bare key (`dana`, `riley`, …) while the api directory, `prisma/seed.ts`, and
+  `scripts/devtoken.mjs` all use `usr_*` ids. Left unfixed, the browser-harness path would break
+  job assignment and pay attribution (riley would see no assigned jobs). Fixed on the **web** side
+  by prefixing the ids to `usr_*` to match the seed/directory.
 
 ## Review lenses Fable must apply (deferred to Fable — do NOT skip)
 

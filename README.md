@@ -1,52 +1,137 @@
 # Dive Schedule
 
-A scheduling app built for hull-cleaning and dive crews. It keeps every
-recurring boat on its rotation, tracks diver pay, runs a checklist/certify
-workflow for each cleaning, emails a service report to the customer the
-moment a job's marked done, and includes simple point-of-sale, inventory,
-and income tracking — all from a phone, tablet, or computer.
+Operations app for **hull-cleaning dive businesses** — commercial divers who clean boat hulls
+in marinas on recurring rotations. It keeps every boat on its cleaning rotation, tracks a
+checklist / certify workflow and an immutable service record per cleaning, computes per-diver
+weekly pay, runs a cash point-of-sale against inventory, and keeps a simple income/expense
+ledger.
 
-This repo holds the deployed app: everything in it is what actually runs
-live for the team, nothing more.
+This repo is the **restructure of a single-file seed PWA into a third-party plugin** for a
+multi-tenant SaaS platform (EOS). The app runs embedded in the platform's workspace **iframe**;
+identity arrives as a per-request **bearer token via a platform bridge**; all data is scoped
+per **installation** (one dive operation = one platform tenant/installation). The platform's
+Vendor Integration Contract has **not landed yet**, so every platform-facing surface is a thin
+interface with a clearly-marked dev stub (see *Platform contract pending* below).
 
-## What's in here
+- **What it is not:** a recreational dive-trip/booking product. There is no login UI, no payment
+  processing, no email backend — those are platform-owned or deferred.
 
-| File | What it is |
+## Directory map
+
+```
+api/       NestJS + Prisma backend. Owns ALL data decisions. Entry: api/src/main.ts. Dev port 4310.
+web/       Next.js (App Router) frontend, rendered in the platform iframe. Entry: web/src/app/page.tsx
+           (+ web/src/app/harness/page.tsx dev harness). Dev port 4311.
+legacy/    The original single-file seed PWA, unmodified (reference only — never edit).
+           legacy/reference/ holds the pre-extracted seed CSS + domain functions used for the port.
+docs/      ARCHITECTURE.md (binding contract), BUILD_STATE.md, BUILD_PROVENANCE.md.
+```
+
+The web app calls the API **same-origin at `/api/*`** through a Next.js rewrite proxy
+(`web/next.config.ts` → `${API_URL}`), so there is no CORS dependence and no cookies. Webhook
+callers hit the API directly at `/webhooks/platform` (not through the proxy).
+
+## Run it locally
+
+Prerequisites: Node 26, npm 11, PostgreSQL 16 (Homebrew, trust auth).
+
+```bash
+# 1. Database (once). Under Homebrew trust auth, put your OS role in the URL (api/.env).
+createdb dive_schedule_dev
+
+# 2. Dependencies (each app is independent — no workspaces).
+npm --prefix api install
+npm --prefix web install
+#    root helper for the concurrent dev script:
+npm install
+
+# 3. Env: copy the examples and adjust DATABASE_URL's role to your local user.
+cp api/.env.example api/.env         # PORT, DATABASE_URL, LOG_LEVEL, CSP_FRAME_ANCESTORS, WEBHOOK_DEV_SIGNATURE
+cp web/.env.example web/.env.local   # API_URL
+
+# 4. Migrate (already applied in this checkout) + seed both installations.
+npm --prefix api run prisma:migrate  # only if migrations are not yet applied
+npm --prefix api run seed
+
+# 5. Run both halves (api on 4310, web on 4311).
+npm run dev
+```
+
+Then open the dev harness at **http://localhost:4311/harness** — it fakes the platform
+workspace: an iframe embedding the app plus a picker for the 5 dev users and a light/dark theme
+toggle, so you can exercise permission-driven views without the real platform.
+
+### The 5 dev users (harness picker + Prisma seed)
+
+Identity is faked in dev by a `devtoken.<base64url(JSON)>` the harness mints; the API's
+`DevStubIdentityProvider` decodes it **without any signature check** (dev only). Each user shows
+a different slice of the app because rendering is **permission-driven**, never role-name-driven.
+
+| Key | Name / role | Tenant · Installation | Demonstrates |
+|---|---|---|---|
+| `dana`  | Dana Reyes — Owner        | `tenant_demo` · `inst_demo`  | All 19 permissions; every screen; full lifecycle |
+| `sam`   | Sam Okafor — Divemaster   | `tenant_demo` · `inst_demo`  | Crew lead: jobs+pricing, records, crew, all pay, inventory — no finance ledger/POS/settings |
+| `riley` | Riley Chen — Diver        | `tenant_demo` · `inst_demo`  | **view-assigned** jobs only (unassigned ids → 404), **prices stripped**, **own pay only** |
+| `casey` | Casey Marsh — Front desk  | `tenant_demo` · `inst_demo`  | Records + POS + finance, **no pay**, prices stripped (no view-pricing) |
+| `olga`  | Olga Petrov — Owner (2nd) | `tenant_two` · `inst_other`  | **Tenant isolation** — never sees `inst_demo` data |
+
+CLI token minter for curl/testing: `node api/scripts/devtoken.mjs <dana|sam|riley|casey|olga>`
+(add `--curl <key>` for a ready curl line). Example:
+
+```bash
+curl -s http://localhost:4310/api/me -H "Authorization: Bearer $(node api/scripts/devtoken.mjs riley)"
+```
+
+## Environment variables
+
+**api/.env** (see `api/.env.example`):
+
+| Var | Purpose |
 |---|---|
-| `index.html` | The entire app — every screen, all the logic. One file by design, so hosting and updates stay simple. |
-| `manifest.webmanifest` | Lets the app install to a phone's home screen like a real app (PWA). |
-| `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | The home-screen icons for Android and iOS. |
+| `PORT` | API port (dev 4310) |
+| `DATABASE_URL` | PostgreSQL URL; include your role, e.g. `postgresql://<role>@localhost:5432/dive_schedule_dev` |
+| `LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` |
+| `CSP_FRAME_ANCESTORS` | Space-separated origins allowed to iframe the app; empty = no lockout (dev-friendly) |
+| `WEBHOOK_DEV_SIGNATURE` | Dev-stub shared secret accepted in the `X-Dev-Signature` webhook header |
 
-## How it's hosted
+**web/.env.local** (see `web/.env.example`):
 
-This repo is connected to Netlify, which auto-deploys the live site on
-every push to the default branch — see `GITHUB-SETUP.md` for how that
-link was set up. To ship an update: push a change here, and the live site
-picks it up automatically within seconds. No manual upload step.
+| Var | Purpose |
+|---|---|
+| `API_URL` | Base URL the Next rewrite proxies `/api/*` and `/webhooks/*` to (dev `http://localhost:4310`) |
 
-## Where the data lives
+No secrets live in code or bundles; identity tokens are held in memory only (never localStorage).
 
-None of it is in this repo. Every job, diver, dive record, sale, and
-stock item lives in a separate Firebase (Firestore) database in the
-cloud. This code only contains the app's *logic* — the screens and
-buttons — plus the database's connection details (project ID and API
-key) so the app knows where to read and write. Updating this code never
-touches the data.
+## Documentation
 
-## A note on the Firebase config
+- **`docs/ARCHITECTURE.md`** — the binding internal contract: stack, repo layout, identity
+  interface + dev stub, the 5 dev users, bridge protocol, Prisma schema, the full HTTP API
+  table with enforcement points, and hygiene rules. Authoritative for the build.
+- **`PLATFORM_INTEGRATION_NEEDS.md`** — the platform-team handoff: app inventory, domain
+  entities, the 19-permission catalog (§4), the role → server-side enforcement register (§5),
+  webhook events needed (§6), sensitive-data register (§7), and open questions (§8).
+- **`docs/BUILD_PROVENANCE.md`** — who built what with which model, the final gate results, and
+  the review lenses a later deep review must apply (green gates ≠ review strength).
 
-`index.html` contains a `firebaseConfig` block (project ID + API key) and
-an admin PIN, both in plain text. Firebase web API keys aren't secret the
-way a password is — normally a database's security rules are what
-actually protect it. This app's rules are intentionally wide open (no
-login required, so the whole crew can use it with zero setup), which
-means anyone who found this project ID could read or write the schedule
-directly. Keeping this repository **private** is a simple, worthwhile
-precaution on top of that. See `GITHUB-SETUP.md` for where to set that
-when creating the repo.
+## Platform contract pending (the dev stubs)
 
-## Making changes
+Until the Vendor Integration Contract arrives, four platform-facing surfaces are thin interfaces
+with clearly-marked dev stubs, each swappable without touching feature code:
 
-`index.html` is a single self-contained file — HTML, CSS, and JavaScript
-together, no build step and no dependencies to install. Edit it directly
-(on GitHub, or in any text editor) and push; Netlify handles the rest.
+- **Identity** — `IdentityProvider` (`api/src/auth/identity.ts`). Only impl today is
+  `DevStubIdentityProvider`, which decodes `devtoken.<base64url(JSON)>` with **no cryptographic
+  verification** (`// DEV STUB — NEVER SHIP`, loud boot warning). Real impl will verify
+  platform-signed (JWKS) tokens behind the same interface.
+- **Webhook signature** — `WebhookVerifier` (`api/src/webhooks/webhook-verifier.ts`). Dev stub
+  accepts the `X-Dev-Signature: dev` header (from `WEBHOOK_DEV_SIGNATURE`) and 401s otherwise.
+  `installation.uninstalled` triggers a full per-installation cascade delete; other events are
+  logged + 202.
+- **Directory** — `PlatformDirectory` (`api/src/platform/directory.ts`). Dev stub resolves user
+  names for job/record payloads and assignment pickers from the seeded dev-user table.
+- **Tenant profile** — `PlatformTenantProfile` (`api/src/platform/tenant.ts`). Dev stub returns
+  constants including **timezone** (`inst_demo` → America/Los_Angeles, `inst_other` →
+  America/New_York), used for due-date rotation math and Monday-based pay weeks.
+
+The web-side bridge (`web/src/lib/platform/bridge.ts`) mirrors this: an `IframeBridge`
+(postMessage to the host) for the real workspace and a `StandaloneDevBridge` / harness path for
+local dev. App code imports only the `PlatformBridge` interface.

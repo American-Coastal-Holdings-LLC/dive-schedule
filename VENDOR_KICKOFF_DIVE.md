@@ -11,6 +11,24 @@ You are taking over development of this dive-operations app. It is currently an 
 - **Data:** the app reads/writes platform data only through a **scoped REST API** (per-resource read/write scopes, tenant-isolated) and receives pushes via **signed, timestamped webhooks**. App-domain data (trips, bookings, equipment) lives in the vendor's own database, keyed by platform tenant/installation ID from day one. Sensitive end-customer data (diver PII, anything medical-adjacent) will sit behind a stricter approval tier — collect the minimum and flag every such field in the needs report.
 - **Lifecycle:** installations can be uninstalled per-tenant, and the platform holds a kill switch; on termination the vendor must delete tenant-derived data within a contractual window. Multi-tenant hygiene is therefore structural: every row traceable to an installation, deletable per-installation.
 
+## Target stack & structure (applies to Task B)
+
+The seed is currently a single large `index.html`. It must become a **clean, conventional, easy-to-navigate codebase**, because the EOS team reviews this app before it goes live and an unreviewable mess does not get approved. Reviewability and clean structure are a **listing requirement**, not a nicety — a reviewer should be able to clone the repo and understand it in minutes.
+
+**Recommended stack — align with the EOS platform.** EOS is built on **Next.js + NestJS + PostgreSQL (TypeScript throughout)**, and you are strongly encouraged to build this app on the same stack. Rationale: it is a proven, robust, clean path; it is the stack the EOS team knows, so aligning maximizes the integration support and review help you get from us; and the platform's bridge/SDK examples will be TypeScript-first. This is a strong recommendation, **not** a hard contract requirement — the iframe + bridge contract works regardless of your stack — but divergence means you own more of the integration and support burden yourself. Default to adopting it.
+- **Frontend / embedded UI:** Next.js (React, TypeScript) — this is the app rendered inside the platform iframe.
+- **Backend API:** NestJS (TypeScript).
+- **Database:** PostgreSQL.
+
+**Structure requirements (regardless of stack):**
+- Clear frontend/backend separation in the repo (e.g. `/web` and `/api`, or a documented monorepo layout).
+- Conventional, navigable directory layout — no loose top-level scripts, no dead prototype files.
+- A `README` documenting: what the app is, how to run frontend + backend locally, the directory map, and required env vars.
+- One obvious entry point each for frontend and backend.
+- TypeScript preferred; committed formatting/lint config; `.env`-based config with a committed `.env.example` and no secrets in the repo.
+
+Splitting the single `index.html` into a Next.js frontend + a NestJS backend is the core of the restructure.
+
 ## Task A — Integration-needs report (do this first)
 
 Produce `PLATFORM_INTEGRATION_NEEDS.md` in the repo root. The platform team derives the v1 scoped API from this document, so make it concrete and exhaustive:

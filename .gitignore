@@ -1,0 +1,14 @@
+# OS clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor clutter
+*.swp
+*~
+.vscode/
+.idea/
+
+# Archives / local backups — don't need to live in version control
+*.zip
+*.bak

@@ -9,7 +9,7 @@ you should NOT need to read `legacy/index.html` (200 KB) at all.
 Run the concurrent build workflow (it builds api + web in parallel, then integrates live):
 
 ```
-Workflow({ scriptPath: "/Users/jv/Desktop/Projects/EZDock/vendors/dive-schedule/.build/build-workflow.mjs" })
+Workflow({ scriptPath: "/Users/jv/Desktop/Projects/dive-schedule/.build/build-workflow.mjs" })
 ```
 
 Run the session on **Opus 4.8** (Fable 5 credits are exhausted; the workflow also pins
@@ -71,10 +71,14 @@ build agents tried to read all 4167 lines of `legacy/index.html` in dozens of ch
 
 ## Gotchas
 
+- **Location:** this is a standalone third-party vendor app at
+  `/Users/jv/Desktop/Projects/dive-schedule` (a top-level project, sibling of `EZDock`). It was
+  moved out of `EZDock/vendors/` on 2026-07-18 precisely because a vendor-owned app should not
+  live inside the platform workspace. Open THIS folder as the project root in a fresh session.
+- `plugins/` and other notes in the EZDock root memory do NOT apply here — separate repo, its own
+  git (`AmericanCoastalHoldingsLLC/dive-schedule`, remote `origin/main`, default branch `main`).
+  Do not push.
 - Dev ports: **api 4310, web 4311**. Never 3000–3006 (EOS platform).
 - Postgres connection needs the role in the URL under Homebrew trust auth
   (`postgresql://jv@localhost:5432/...`), else Prisma throws P1010.
-- `plugins/` note in root memory does not apply here — this is a separate vendor repo under
-  `vendors/dive-schedule` with its own git (`AmericanCoastalHoldingsLLC/dive-schedule`, remote
-  `origin/main`). Local `baseline`? No — this repo's default is `main`. Do not push.
-- `.build/` (this workflow script) is gitignored — orchestration, not deliverable.
+- `.build/` (the workflow script) is gitignored — orchestration, not deliverable.

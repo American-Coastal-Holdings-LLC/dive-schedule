@@ -13,7 +13,8 @@ adversarial review. Keep it honest and current.
 |---|---|---|
 | 07-18 (earlier) | Fable 5 (orchestrator) | Seed inventory (2 Explore agents); `PLATFORM_INTEGRATION_NEEDS.md`; `docs/ARCHITECTURE.md` (contract); moved seed → `legacy/`. Committed `8aa0102` (local). |
 | 07-18 | Fable 5 | Two build workflows launched — **both died on Fable-5 credit/session limits before producing code.** Partial scaffolds wiped; no Fable-built code survives in the tree. |
-| 07-18 | **Opus 4.8** (this session) | **`api/` (NestJS) + `web/` (Next.js) restructure built here.** See scope + self-test results below. |
+| 07-18 | **Opus 4.8** (this session) | **`api/` (NestJS) + `web/` (Next.js) restructure built here.** See scope + self-test results below. Committed `6c3a1fb`. |
+| 07-18 (later, same session) | **Opus 4.8** | **Phase 0 EOS-security hardening** (`2824f80`); **EOS contract-conformance analysis** (`docs/CONTRACT_IMPACT.md`, via a 14-agent adversarial workflow); reviewed the **live EOS docs** (eos-developer-docs.vercel.app) and confirmed the analysis. Crypto wiring (Phases 1–2) deferred per the owner. |
 
 ## What Opus 4.8 built (needs Fable review)
 
@@ -108,6 +109,35 @@ week/month/year + 6-month trend, riley → 403.
   `scripts/devtoken.mjs` all use `usr_*` ids. Left unfixed, the browser-harness path would break
   job assignment and pay attribution (riley would see no assigned jobs). Fixed on the **web** side
   by prefixing the ids to `usr_*` to match the seed/directory.
+
+## Phase 0 hardening + contract analysis (later in this session — also UNreviewed)
+
+After the build, Opus ran an **EOS-security-first contract-conformance analysis** and applied
+**Phase 0** hardening. Both were self-verified by Opus (incl. adversarial subagents), **NOT** by
+Fable — treat as unreviewed.
+
+- **`docs/CONTRACT_IMPACT.md`** — the analysis + severity-ranked findings + phased wiring roadmap +
+  §8 scorecard. Produced by a 14-agent workflow (2 doc digests + 10 adversarial verifiers +
+  completeness critic + EOS-vulnerability hunt). Confirmed against the **live** EOS docs. Fable should
+  re-verify the ranked findings against the code — especially the **two EOS-CRITICAL webhook items,
+  still OPEN** (deferred to Phase 1): header-only signature can't bind to the body while the
+  `@Public()` webhook drives a cross-tenant cascade delete from `body.installationId`; and the event
+  name is `installation.uninstalled` vs the contract's `installation.deleted`.
+- **Phase 0 changes** (`2824f80`, 11 files): (1) **fail-closed dev-stub guards** — a shared allow-list
+  (`api/src/common/dev-stub-guard.ts`) that all four stubs (identity, webhook, directory, tenant) call
+  in `onModuleInit`; refuses to boot outside `development`/`test` (or explicit `ALLOW_DEV_STUBS=true`),
+  production hard-blocked. (2) removed the `X-Dev-Signature: dev` default. (3) `frame-ancestors` CSP on
+  the **Next embed HTML** (`web/next.config.ts`). (4) **bridge origin-pinning** (`web/src/lib/platform/
+  bridge.ts` + harness) — no more `postMessage('*')`, validates `event.origin`.
+  - Opus self-verified: typecheck + build clean; guard matrix **9/9 fail-closed** (production even with
+    the flag, unset, staging, case/whitespace all blocked); live harness QA green (token handshake +
+    theme push over the pinned bridge, no console errors); prod-boot test confirms the guard aborts
+    boot + never binds the port.
+  - Opus ran its **own adversarial review** of the Phase 0 diff, which caught a real hole in the first
+    cut (the guard was fail-*open* for any env != exactly "production") — fixed to the allow-list above.
+    Fable should still independently re-check: no exfil bypass in the origin pin; the CSP covers every
+    HTML route; the guard has no residual fail-open; and the removed webhook default didn't break the
+    dev flow.
 
 ## Review lenses Fable must apply (deferred to Fable — do NOT skip)
 

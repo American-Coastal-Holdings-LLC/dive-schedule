@@ -1,84 +1,100 @@
 # Build State — Fresh-Chat Resume Point
 
-**Read this first if you are picking up the dive-schedule restructure in a new session.**
-Everything needed to continue is on disk; this file is the index. Keep your context lean —
-you should NOT need to read `legacy/index.html` (200 KB) at all.
+**Read this first if you are picking up dive-schedule in a new session.** Then read
+`docs/CONTRACT_IMPACT.md` (contract analysis + phased wiring roadmap) and `docs/OPEN_QUESTIONS.md`
+(decisions the owner/platform still owe). Everything is on disk and pushed.
 
-## One-line resume (do this)
+## TL;DR
 
-Run the concurrent build workflow (it builds api + web in parallel, then integrates live):
+The seed PWA is now a working **Next.js + NestJS + PostgreSQL** plugin, restructured for the EOS
+multi-tenant platform, **built end-to-end and EOS-security-hardened**. It runs today entirely on
+**dev stubs** (a local "fake EOS" harness); the real **cryptographic** handshake to EOS is
+**deliberately deferred** (owner's call — see NEXT). Nothing is blocked; the app is fully
+exercisable now via `/harness`.
 
-```
-Workflow({ scriptPath: "/Users/jv/Desktop/Projects/dive-schedule/.build/build-workflow.mjs" })
-```
-
-Run the session on **Opus 4.8** (Fable 5 credits are exhausted; the workflow also pins
-`model: 'opus'` on its agents so it's robust either way). It runs in the background and notifies
-on completion. Then do the human-in-the-loop finish: live browser QA of the harness, then a
-local commit (no push). The **Fable deep review is deliberately deferred** — see
-`docs/BUILD_PROVENANCE.md`.
+Branch `main`, synced to `origin/main` (`AmericanCoastalHoldingsLLC/dive-schedule`). HEAD: `2824f80`.
 
 ## What the app is
 
-Vendor-owned hull-cleaning dive-ops app being restructured from a single-file seed PWA into a
-Next.js + NestJS + PostgreSQL app that will run as a **third-party plugin inside a multi-tenant
-SaaS platform (EOS)** — embedded in an iframe, identity via a platform bridge token, data
-per-installation-scoped. Full brief: `VENDOR_KICKOFF_DIVE.md`. Contract/spec: `docs/ARCHITECTURE.md`.
+A vendor-owned hull-cleaning **dive-ops ERP**, shipped as a **third-party plugin inside the EOS
+multi-tenant SaaS platform** — embedded in an iframe in the EOS workspace, identity via a platform
+bridge token, data per-installation-scoped. It is **white-labeled**: it looks like a complete
+standalone product; EOS is the identity + data backbone. Authoritative contract: the live EOS docs
+at **https://eos-developer-docs.vercel.app** (Vendor Integration Contract + Kickoff Block A). Our
+conformance analysis: `docs/CONTRACT_IMPACT.md`. Internal build spec: `docs/ARCHITECTURE.md`.
 
-## DONE (committed / on disk — do not redo)
+## DONE (committed + pushed — do not redo)
 
-- **Task A complete:** `PLATFORM_INTEGRATION_NEEDS.md` (the platform-team handoff report).
-- **Contract:** `docs/ARCHITECTURE.md` — binding internal spec (stack, identity interface + dev
-  stub, 5 dev users, bridge protocol, Prisma schema, full HTTP API table, hygiene). The API
-  table and enforcement points are authoritative for the build.
-- **Seed moved** to `legacy/` (unmodified reference). Key bits pre-extracted so nobody re-reads
-  the 200 KB file:
-  - `legacy/reference/seed-domain-logic.js` — domain functions to port VERBATIM.
-  - `legacy/reference/seed-styles.css` — the seed CSS to reuse.
-- **api/ scaffolded + deps installed** (`api/node_modules` present): package.json, tsconfig,
-  nest-cli.json, `.env.example`, local `.env` (gitignored, `DATABASE_URL=postgresql://jv@localhost:5432/dive_schedule_dev`).
-- **Prisma schema written + MIGRATED** (`api/prisma/schema.prisma` + `api/prisma/migrations/*/migration.sql`),
-  client generated, DB `dive_schedule_dev` created. Do NOT reset it.
-- **web/ scaffolded + deps installed** (`web/node_modules` present): package.json, tsconfig,
-  next.config.ts (proxy to api), eslint, `.env.example`, `.env.local`.
-- Root: `package.json` (dev/build/typecheck/seed across api+web), `.prettierrc`, `.gitignore`.
+1. **Foundation** (`05e36b0`, `81b055a`): api/ + web/ scaffolds, deps, Prisma schema + `init`
+   migration (8 models, all `installationId`-keyed, migrated to `dive_schedule_dev`), `legacy/`
+   reference extracts.
+2. **Full app source** (`6c3a1fb`): NestJS api (auth/guards, 19 perms, 5 dev users, every route with
+   server-side enforcement, ported domain logic, webhooks, platform stubs, seed) + Next.js web
+   (bridge, api client, PermissionsProvider, 7 tabs + modals, `/harness`). Integrated live —
+   **28/28 smoke green** (identity, permissions, tenant isolation, pay, POS atomicity, uninstall
+   cascade). Live browser QA passed (5 users, permission-driven views, tenant isolation, theme push).
+3. **EOS-security contract analysis** (`docs/CONTRACT_IMPACT.md`): 14-agent EOS-security-first
+   conformance workflow (2 doc digests + 10 adversarial verifiers + completeness critic + EOS-vuln
+   hunt). Headline: **backend tenant isolation is verified solid** (every query `installationId`-
+   scoped, mass-assignment blocked, safeUrl/no-SSRF, logs redacted); exposure is at the webhook +
+   bridge trust boundaries + the un-built crypto. §8 scorecard: **9 answered / 3 partial / 2
+   unanswered**.
+4. **Phase 0 hardening** (`2824f80`) — the platform-independent EOS-security fixes:
+   - **Fail-closed dev stubs** (all 4: identity, webhook, directory, tenant) — refuse to boot outside
+     a known dev/test env; production hard-blocked. Shared guard `api/src/common/dev-stub-guard.ts`.
+   - Removed the `X-Dev-Signature: dev` global-constant default (rejects when unset).
+   - `frame-ancestors` CSP on the **Next embed HTML** (was only on the API's JSON responses).
+   - Bridge stops posting the identity token to `'*'` — pins `targetOrigin` + validates `event.origin`.
+   - Adversarially reviewed: the first cut's guard was fail-**open** for any env name != exactly
+     "production" → fixed to a default-deny allow-list, verified **9/9** matrix.
+5. **Live EOS docs reviewed** — confirmed the analysis line-for-line (token semantics, `bridge/verify`,
+   JWKS/alg-pin, OAuth2 PKCE, HMAC `v1:{ts}.{rawBody}` webhooks, `installation.deleted`, sensitive
+   tier, 30-day deletion + attestation, §9 security MUSTs). The docs are a **living source** — build
+   against them, not a downloaded copy.
 
-## TODO (the workflow does the first three; you do the rest)
+## Interfaces we have ready (the seams)
 
-1. **Build api source** — auth (dev-stub identity + guards + 19 perms + 5 dev users), Prisma
-   service, all modules/routes per the API table with exact enforcement points, domain logic
-   ported, webhooks, platform stubs, `prisma/seed.ts` for both installations. (Workflow: build:api)
-2. **Build web source** — bridge, api client, PermissionsProvider, the 7 tabs ported with the
-   seed CSS, the `/harness` dev page. (Workflow: build:web)
-3. **Integrate + README + provenance** — boot both, run the full 10-item smoke suite, fix
-   contract mismatches, write `README.md`, update `docs/BUILD_PROVENANCE.md`. (Workflow: integrate)
-4. **Human finish (you, after the workflow):**
-   - Live browser QA: open `http://localhost:4311/harness`, switch through all 5 dev users,
-     confirm permission-driven views (riley sees only his jobs + no prices; casey no pay; olga
-     isolated), toggle harness theme, confirm the app renders inside the iframe.
-   - **Commit locally, staged by explicit path, no AI trailer, NO push** (owner pushes).
-   - Report back: what exists, what's stubbed, what's blocked on the Vendor Integration Contract,
-     the open-questions list (already in `PLATFORM_INTEGRATION_NEEDS.md` §8).
+Every EOS touchpoint is a clean interface with a **dev-stub** behind it; the app runs end-to-end on
+these (the `/harness` proves it). The only thing NOT real is the crypto/network handshake:
 
-## Why prior build attempts failed (so you don't repeat it)
+| Interface | File(s) | Real version (deferred = crypto) |
+|---|---|---|
+| Identity ("who / tenant / perms") | `api/src/auth/identity.ts` + `dev-stub.provider.ts` | JWKS verify + `POST /bridge/verify` |
+| Front-end bridge | `web/src/lib/platform/bridge.ts` | EOS bridge SDK (MessageChannel) |
+| Directory (users on an installation) | `api/src/platform/directory.ts` | `users.read` scoped API |
+| Tenant profile (name, timezone) | `api/src/platform/tenant.ts` | `tenant.read` scoped API |
+| Webhook verifier | `api/src/webhooks/webhook-verifier.ts` | HMAC-SHA256 signature |
+| Permissions + guards | `api/src/auth/*.guard.ts`, `permissions.ts` | **already real** |
+| Multi-tenant data scoping | every Prisma query | **already real** |
 
-Three earlier runs died: two on Fable-5 credit/session limits, one on **context exhaustion** —
-build agents tried to read all 4167 lines of `legacy/index.html` in dozens of chunks plus huge
-`npm install` output, blew their context, terminally errored, and retried into the same wall
-(112 reads / 4 writes, zero code produced). Fixes now in place and baked into the workflow:
-**(1)** deps pre-installed + schema pre-migrated (agents don't install or migrate);
-**(2)** `legacy/index.html` reading forbidden — agents use the small reference files.
+## NEXT (deferred / not started)
 
-## Gotchas
+**Crypto wiring is deferred per the owner** ("if it's a feature involving crypto we can skip it"):
+- **Phase 1** — real webhook signature (HMAC), raw-body binding, ±5-min + idempotency,
+  `installation.uninstalled` → `installation.deleted`. *(Top EOS-critical cross-tenant item; still open.)*
+- **Phase 2** — real identity: JWKS verification + `bridge/verify`; OAuth2 PKCE client + encrypted
+  per-installation token/secret store.
+- **Phase 3** — scoped-API clients (`notifications.send`, `files.*`, `subscription.read`, `users.read`).
 
-- **Location:** this is a standalone third-party vendor app at
-  `/Users/jv/Desktop/Projects/dive-schedule` (a top-level project, sibling of `EZDock`). It was
-  moved out of `EZDock/vendors/` on 2026-07-18 precisely because a vendor-owned app should not
-  live inside the platform workspace. Open THIS folder as the project root in a fresh session.
-- `plugins/` and other notes in the EZDock root memory do NOT apply here — separate repo, its own
-  git (`AmericanCoastalHoldingsLLC/dive-schedule`, remote `origin/main`, default branch `main`).
-  Do not push.
-- Dev ports: **api 4310, web 4311**. Never 3000–3006 (EOS platform).
-- Postgres connection needs the role in the URL under Homebrew trust auth
-  (`postgresql://jv@localhost:5432/...`), else Prisma throws P1010.
-- `.build/` (the workflow script) is gitignored — orchestration, not deliverable.
+Full phased roadmap + severity-ranked findings: `docs/CONTRACT_IMPACT.md`.
+
+**Non-crypto work available now** (does not need EOS live):
+- **Marketing site** + **branded-domain app surface** (standalone front door with an EOS-redirect
+  login) — net-new, not built. See `docs/OPEN_QUESTIONS.md` §1 (login-form compliance boundary).
+- Scoped-API **interface stubs** (notifications / files / subscription) — buildable without crypto.
+- The plugin **manifest** (registration file, contract §2).
+- **Permission-catalog reconciliation** — our 19 `dive.*` vs the kickoff digest's 17.
+
+## Gotchas / environment
+
+- Standalone vendor repo at `/Users/jv/Desktop/Projects/dive-schedule` (sibling of `EZDock`, the EOS
+  platform workspace). Remote `origin` = `AmericanCoastalHoldingsLLC/dive-schedule`, branch `main`.
+- **The owner now authorizes committing + pushing** (established this session). **No AI trailer** in
+  commit messages. Stage by explicit path.
+- Dev ports: api **4310**, web **4311**. `npm run dev` runs both. `api start:dev` sets
+  `NODE_ENV=development` so the fail-closed stub guard passes locally (or set `ALLOW_DEV_STUBS=true`).
+- Postgres via Homebrew trust auth; role in the URL (`postgresql://jv@localhost:5432/dive_schedule_dev`).
+  DB is migrated + seeded — **do NOT reset**.
+- **Do NOT put EOS platform-internal docs in this repo** (esp. the `_`-prefixed files from the platform
+  doc bundle). See project memory.
+- `docs/BUILD_PROVENANCE.md` is the **Fable review handoff** — what's self-tested vs. UNreviewed.

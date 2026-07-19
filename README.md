@@ -112,6 +112,11 @@ No secrets live in code or bundles; identity tokens are held in memory only (nev
   webhook events needed (§6), sensitive-data register (§7), and open questions (§8).
 - **`docs/BUILD_PROVENANCE.md`** — who built what with which model, the final gate results, and
   the review lenses a later deep review must apply (green gates ≠ review strength).
+- **`docs/BUILD_STATE.md`** — **start here in a fresh session.** Current state, what's done vs.
+  deferred, the interface inventory, and how to resume.
+- **`docs/CONTRACT_IMPACT.md`** — conformance analysis of the live EOS Vendor Integration Contract
+  against this build: §8 scorecard, severity-ranked findings, and the phased wiring roadmap.
+- **`docs/OPEN_QUESTIONS.md`** — decisions the owner/platform still owe, and notes for Fable.
 
 ## Platform contract pending (the dev stubs)
 

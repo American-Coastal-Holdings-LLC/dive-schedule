@@ -6,10 +6,15 @@ multi-tenant platform, so the organizing principle is *no vendor-side wiring may
 cross-tenant vulnerability*. Every conflict below was verified against the actual code, not just the
 docs. Companion to [`ARCHITECTURE.md`](./ARCHITECTURE.md) (our build spec),
 [`../PLATFORM_INTEGRATION_NEEDS.md`](../PLATFORM_INTEGRATION_NEEDS.md) (our needs report, §8 = 14 open
-questions), and [`BUILD_PROVENANCE.md`](./BUILD_PROVENANCE.md).
+questions), and [`BUILD_PROVENANCE.md`](./BUILD_PROVENANCE.md). **Confirmed line-for-line against the live EOS docs
+(https://eos-developer-docs.vercel.app — the authoritative "living source") on 2026-07-18**, including
+the dive-specific Kickoff Block A.
 
 > The contract's resource/event/scope surface (§7/§8) is **provisional** and will grow additively
 > before v1.0. Wire to the shape now; confirm the provisional surface before deep work.
+>
+> **Crypto wiring (Phases 1–2) is deferred per the owner** — see `OPEN_QUESTIONS.md`. Phase 0
+> (platform-independent hardening) is done and pushed.
 
 ## Bottom line
 

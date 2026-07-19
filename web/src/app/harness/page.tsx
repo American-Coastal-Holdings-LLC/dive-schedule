@@ -115,7 +115,8 @@ export default function HarnessPage() {
 
   const reply = useCallback((source: MessageEventSource | null, message: Record<string, unknown>, note: string) => {
     try {
-      (source as Window | null)?.postMessage(message, '*');
+      // The harness embeds the app same-origin; pin the reply so the token isn't posted to '*'.
+      (source as Window | null)?.postMessage(message, window.location.origin);
       pushLog('out', note);
     } catch {
       /* ignore */
@@ -124,6 +125,8 @@ export default function HarnessPage() {
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
+      // Only accept bridge traffic from the same-origin embedded app.
+      if (event.origin !== window.location.origin) return;
       const data = event.data;
       if (!data || typeof data.type !== 'string' || !data.type.startsWith(PREFIX)) return;
       const verb = data.type.slice(PREFIX.length);
@@ -166,7 +169,7 @@ export default function HarnessPage() {
     themeRef.current = t;
     const win = iframeRef.current?.contentWindow;
     if (win) {
-      win.postMessage({ type: `${PREFIX}theme`, vars: themeMap(t) }, '*');
+      win.postMessage({ type: `${PREFIX}theme`, vars: themeMap(t) }, window.location.origin);
       pushLog('out', `theme push → ${t}`);
     }
   };

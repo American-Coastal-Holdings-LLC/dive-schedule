@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { assertDevStubAllowed } from '../common/dev-stub-guard';
 
 // Tenant profile read from the platform (operation name, contact email, and —
 // critically — the tenant timezone that due-date rotation math and Monday-based
@@ -35,7 +36,13 @@ const PROFILES: Record<string, TenantProfile> = {
 };
 
 @Injectable()
-export class DevStubTenantProvider implements PlatformTenantProvider {
+export class DevStubTenantProvider implements PlatformTenantProvider, OnModuleInit {
+  // Own fail-closed tripwire: serves hardcoded tenant profiles (names, contact emails, timezones used
+  // in pay/rotation math), so it must never run outside dev/test.
+  onModuleInit(): void {
+    assertDevStubAllowed('DevStubTenantProvider');
+  }
+
   async getProfile(installationId: string): Promise<TenantProfile> {
     return (
       PROFILES[installationId] || {

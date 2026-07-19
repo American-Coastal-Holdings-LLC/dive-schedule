@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { assertDevStubAllowed } from '../common/dev-stub-guard';
 import { Identity, IdentityProvider } from './identity';
 
 // ============================================================================
@@ -17,6 +18,9 @@ export class DevStubIdentityProvider implements IdentityProvider, OnModuleInit {
   private static readonly PREFIX = 'devtoken.';
 
   onModuleInit(): void {
+    // Fail closed: this stub performs NO cryptographic verification, so any caller could mint a token
+    // for any tenant. Refuse to boot outside a known dev/test context (see dev-stub-guard).
+    assertDevStubAllowed('DevStubIdentityProvider');
     this.logger.warn(
       'DEV STUB IDENTITY PROVIDER ACTIVE — identity tokens are NOT cryptographically verified. NEVER SHIP. Replace with platform JWKS verification before production.',
     );

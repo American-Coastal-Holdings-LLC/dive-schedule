@@ -37,16 +37,47 @@ interface Pending {
   replyType: string;
 }
 
+// The expected platform (host) origin for postMessage. The 5-minute identity token crosses this
+// channel, so it must be pinned: post ONLY to this origin (never '*') and accept messages ONLY from
+// it. Set NEXT_PUBLIC_PLATFORM_ORIGIN to the EOS workspace origin in production; in the same-origin
+// dev harness it falls back to this app's own origin. (The real EOS bridge SDK will replace this
+// hand-rolled channel with a MessageChannel port; until then this closes the token-exfiltration gap.)
+function platformOrigin(): string {
+  const configured = (process.env.NEXT_PUBLIC_PLATFORM_ORIGIN || '').trim();
+  if (configured) {
+    // Normalize so a trailing slash or case difference in the configured value doesn't silently break
+    // the pin — the browser's event.origin is always a bare, normalized origin.
+    try {
+      return new URL(configured).origin;
+    } catch {
+      /* misconfigured value: fall through to same-origin rather than pin to a bad string */
+    }
+  }
+  return typeof window !== 'undefined' ? window.location.origin : '';
+}
+
 class IframeBridge implements PlatformBridge {
   private pending = new Map<string, Pending>();
   private seq = 0;
+  private readonly hostOrigin = platformOrigin();
 
   constructor() {
+    if (!process.env.NEXT_PUBLIC_PLATFORM_ORIGIN) {
+      // Framed but no explicit host origin configured: we pin to our own origin. Correct for the
+      // same-origin dev harness; for a cross-origin host this must be set (at build time) or the
+      // handshake silently times out instead of leaking anywhere.
+      console.warn(
+        `[bridge] NEXT_PUBLIC_PLATFORM_ORIGIN not set — pinning postMessage to ${this.hostOrigin}. ` +
+          'Set it at build time to the EOS host origin for a cross-origin embed.',
+      );
+    }
     window.addEventListener('message', this.onMessage);
     this.post('ready', {});
   }
 
   private onMessage = (event: MessageEvent) => {
+    // Only trust messages from the pinned host origin — a foreign frame must not inject a token/theme.
+    if (event.origin !== this.hostOrigin) return;
     const data = event.data;
     if (!data || typeof data.type !== 'string' || !data.type.startsWith(ENVELOPE_PREFIX)) return;
     const verb = data.type.slice(ENVELOPE_PREFIX.length);
@@ -77,7 +108,8 @@ class IframeBridge implements PlatformBridge {
 
   private post(verb: string, payload: Record<string, unknown>) {
     try {
-      window.parent.postMessage({ type: ENVELOPE_PREFIX + verb, ...payload }, '*');
+      // Pin targetOrigin so the identity token is never broadcast to an unexpected parent frame.
+      window.parent.postMessage({ type: ENVELOPE_PREFIX + verb, ...payload }, this.hostOrigin);
     } catch {
       /* posting to the parent can throw in exotic sandboxes; treated as no-op */
     }

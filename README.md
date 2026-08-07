@@ -1,10 +1,23 @@
 # Dive Schedule
 
+An **American Coastal Holdings** plugin for the EOS operations platform, and the first piece of
+an **ERP for the commercial dive industry**.
+
 Operations app for **hull-cleaning dive businesses** — commercial divers who clean boat hulls
 in marinas on recurring rotations. It keeps every boat on its cleaning rotation, tracks a
 checklist / certify workflow and an immutable service record per cleaning, computes per-diver
 weekly pay, runs a cash point-of-sale against inventory, and keeps a simple income/expense
 ledger.
+
+It is a sibling to [SprocketSuite](../SprocketSuite-Plugin) (e-bike shop operations): same
+platform, same integration contract, same shape — a vendor-owned, vendor-hosted product that runs
+white-labelled inside the EOS workspace.
+
+> **The product name is a working title.** "Dive Schedule" describes the seed app, not the ERP
+> this is becoming, and a rename is expected. Every surface that renders the name reads it from
+> [`web/src/lib/brand.ts`](web/src/lib/brand.ts) so the rename is one edit — do not hard-code the
+> product name anywhere. The one thing that will not follow automatically is the `dive.*`
+> permission prefix, which is a wire contract with the platform.
 
 This repo is the **restructure of a single-file seed PWA into a third-party plugin** for a
 multi-tenant SaaS platform (EOS). The app runs embedded in the platform's workspace **iframe**;
@@ -25,7 +38,34 @@ web/       Next.js (App Router) frontend, rendered in the platform iframe. Entry
 legacy/    The original single-file seed PWA, unmodified (reference only — never edit).
            legacy/reference/ holds the pre-extracted seed CSS + domain functions used for the port.
 docs/      ARCHITECTURE.md (binding contract), BUILD_STATE.md, BUILD_PROVENANCE.md.
+manifest.json  EOS plugin registration: the 19 dive.* permissions, requested scopes, webhook
+           endpoint + event types, OAuth redirect. Carries a PLACEHOLDER embed host — no vendor
+           box is allocated yet.
 ```
+
+## Branding and the design system
+
+The product brand is **ours** (the vendor's) and is the name in the EOS plugin catalogue. The
+**tenant's** name and logo arrive at runtime from the tenant profile — the app is white-labelled,
+so rendering the product name where a customer's name belongs is a bug.
+
+`web/src/app/globals.css` is the token layer, and it has a contract worth reading before you touch
+colour. EOS pushes its theme onto `:root` as inline styles, so the host always wins; the app is
+built to follow. Six host-owned inputs (`--bg`, `--surface`, `--text`, `--muted`, `--border`,
+`--primary`) drive roughly thirty derived tokens via `color-mix()` — hairlines, status tints,
+scrim, toast, the recessed plane. Consequences:
+
+- **Never hard-code a colour at a call site.** A literal is a colour that will not follow the
+  theme. Add colour by deriving it in the token layer.
+- **The deep-ocean navy `--brand` is deliberately NOT host-injectable** — it is the product's
+  identity, not the tenant's theme, and it holds under any host palette.
+- **Verify with the `/harness` "Host theme" toggle.** Its dark profile is an intentionally alien
+  slate-and-amber palette that appears nowhere in the stylesheet; if the app still reads correctly
+  under it, the derivation is genuinely working rather than falling back to our own dark literals.
+
+`web/src/lib/platform/bridge.ts` → `themeToCss` maps EOS's semantic token object
+(`{ mode, colors: { background, foreground, primary, … } }`) onto those CSS names. Without it a
+pushed theme lands on properties no rule reads and is silently ignored.
 
 The web app calls the API **same-origin at `/api/*`** through a Next.js rewrite proxy
 (`web/next.config.ts` → `${API_URL}`), so there is no CORS dependence and no cookies. Webhook

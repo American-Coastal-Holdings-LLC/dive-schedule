@@ -52,6 +52,80 @@ conformance analysis: `docs/CONTRACT_IMPACT.md`. Internal build spec: `docs/ARCH
    tier, 30-day deletion + attestation, §9 security MUSTs). The docs are a **living source** — build
    against them, not a downloaded copy.
 
+6. **Brand + design-system pass** (this session) — turned the app from "a working seed" into a
+   first-class American Coastal Holdings plugin alongside SprocketSuite:
+   - **`web/src/lib/brand.ts`** — single source for product name/tagline/description/vendor/colour.
+     The name is a **working title**; the rename is now a one-file edit. Nothing renders a literal.
+   - **Token layer rewritten** (`web/src/app/globals.css`) — adopted the platform's contract names
+     (`--bg`/`--surface`/`--text`/`--muted`/`--border`/`--primary`/…), with ~30 tokens **derived**
+     from them via `color-mix()`. Dark mode is now six re-pointed inputs instead of ~50 hand-tuned
+     literals. Old private names (`--ink*`, `--line*`, `--accent*`) were swept repo-wide.
+   - **Real bug fixed — the host theme was being ignored.** The bridge applied whatever `vars` map
+     arrived, but EOS sends a *semantic* object (`{mode, colors:{background, foreground, …}}`), so
+     a pushed theme landed on properties no rule reads. Added `themeToCss` (bridge.ts) + the
+     `data-eos-mode` hook. **Verified**: an alien slate/amber host palette now re-themes the whole
+     app; measured contrast 8.7:1 subtext, 5.6:1 status chips, 7.6:1 active tab.
+   - **Second bug fixed — dark fallbacks beat the derivation.** The no-`color-mix` dark literals sat
+     after the `@supports` block at equal specificity, so under *OS dark + host light* the app
+     rendered `#a7b4ca` text and `#1a2740` chips on white cards. Now guarded by `@supports not`.
+   - **Third fix — elevation inverted between themes.** Segmented tracks used `--border-soft`,
+     which is darker than the surface in light themes and lighter in dark, so the selected pill's
+     raised affordance flipped. Added `--surface-sunken`, mixed toward `--bg` (recessed in both).
+   - **Typography** — ships Inter Variable (47 KB, latin subset, one preload) via `next/font/local`,
+     replacing the system stack that changed metrics per machine. Tabular figures for money.
+   - **Chrome + a11y** — refined navy header (sheen + waterline detail), real tablist semantics
+     (roving tabindex, arrow keys, `tabpanel`), and a global `:focus-visible` ring.
+   - **`manifest.json`** — EOS plugin registration: 19 `dive.*` permissions with display copy, 4
+     scopes with purposes, webhooks, OAuth redirect. **Embed host is a PLACEHOLDER** (no vendor box
+     allocated). Also accepted the contract's renamed `installation.deleted` event alongside the
+     old `installation.uninstalled` in the webhook controller, so declaring it cannot silently
+     fail the deletion cascade.
+
+   **Two open questions this raised** (both flagged in `manifest.json`): whether permission keys
+   should carry the `dive.` prefix (SprocketSuite's manifest declares them unprefixed, suggesting
+   the platform namespaces per plugin), and the real embed host/IP once a box exists.
+
+7. **Deployability pass — the deferred crypto, now built.** Goal: EOS login → workspace → this app
+   embedded as a plugin. Mirrors SprocketSuite throughout (owner's directive: same delivery and
+   operation as its sibling, not a bespoke design).
+   - **Permission namespacing** (`api/src/auth/permissions.ts`) — `fullKey`/`stripNamespace`/
+     `assertSlugCoherence`, the three-form model from SprocketSuite. **This was a latent
+     app-killer**: contract §2 registers bare keys into `ext.<vendorSlug>.<pluginSlug>.*`, so the
+     wire delivers that form while every guard compares `dive.*`. Nothing throws — the sets never
+     intersect, so every user would see an empty app the moment real identity landed.
+   - **Manifest corrected to bare keys** (`jobs.view-all`, not `dive.jobs.view-all`).
+   - **Real identity** (`auth/jwks-identity.provider.ts`) — JWKS with a pinned ES256/EdDSA
+     allowlist (rejects `alg:none` + HS* confusion), issuer/expiry, `typ==='bridge'`,
+     `pluginName===pluginSlug()`, then `POST /bridge/verify` for live state. Authorizes against the
+     verify response, never the baked claim. Fails closed if the platform is unreachable.
+   - **Real webhook HMAC** (`webhooks/webhook-verifier.ts`) — `{deliveryId}.{timestamp}.{rawBody}`,
+     `v1=<hex>`, ±300s, constant-time compare, **kid→secret map** for the rotation overlap window.
+     Required widening the verifier interface to take the raw body and `rawBody: true` in `main.ts`
+     — the old headers-only interface made real verification impossible to implement.
+     **Verified 8/8** (`scripts/dev-checks/webhook-signature.mjs`): valid, rotated-kid valid,
+     cross-tenant body tamper, wrong secret, stale timestamp, unknown kid, malformed header, no
+     headers.
+   - **OAuth + scoped API** (`platform/oauth-client.ts`, `scoped-api-client.ts`) — Basic-auth header
+     + JSON body (§4), `grant_type=installation`, in-memory token cache, one retry on generic 401,
+     `PluginRevokedError` on the §6 kill-switch code. Authorization-Code+PKCE deliberately NOT built
+     — nothing needs user-delegated access yet.
+   - **Real directory + tenant** (`platform/directory.ts`, `tenant.ts`) — scoped-API reads. PII is
+     nulled without sensitive-tier scope, so names fall back to user id and a missing timezone falls
+     back to UTC **loudly** (it drives rotation due-dates and pay weeks).
+   - **All three stub families are now opt-IN** (`USE_DEV_IDENTITY_STUB`, `USE_DEV_WEBHOOK_STUB`,
+     `USE_DEV_PLATFORM_STUBS`); unset selects the real implementation. Boot logs which is active.
+   - **Dockerfile + entrypoint** matching hosting-ops' actual contract (one image, port 8080, Caddy
+     + Postgres siblings). Next serves 8080 and proxies `/api/*` + `/webhooks/*` to the loopback
+     API, reusing the rewrite the app already develops against.
+   - **Verified**: `NODE_ENV=production` now boots clean with all three real providers (it used to
+     die on `DevStubDirectory`); `npm run dev` still boots all stubs. Both confirmed by running them.
+
+   **Not done / blocked:** Docker image never built (Docker not installed on this machine — the
+   Dockerfile is verified only by confirming every COPY source exists against a real build). No
+   vendor box provisioned. Manifest not submitted; vendor/plugin slugs still proposed, not assigned.
+   No end-to-end run against a live EOS — every crypto path is verified against the contract and the
+   vendored devkit's reference implementation, not against the pilot.
+
 ## Interfaces we have ready (the seams)
 
 Every EOS touchpoint is a clean interface with a **dev-stub** behind it; the app runs end-to-end on

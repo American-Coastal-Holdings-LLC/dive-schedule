@@ -94,10 +94,10 @@ const bootCss = `
 .boot { min-height: 70vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; padding: 40px 28px; gap: 12px; }
 .boot-logo { width: 60px; height: 60px; border-radius: 18px; display: flex; align-items: center; justify-content: center;
-  background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line); }
+  background: var(--primary-soft); color: var(--primary); border: 1px solid var(--primary-line); }
 .boot-logo .icn { width: 28px; height: 28px; }
 .boot-logo.err { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-line); }
-.boot-title { font-size: 17px; font-weight: 700; color: var(--ink); }
-.boot-msg { font-size: 14px; color: var(--ink-soft); max-width: 340px; line-height: 1.5; }
+.boot-title { font-size: 17px; font-weight: 700; color: var(--text); }
+.boot-msg { font-size: 14px; color: var(--text-soft); max-width: 340px; line-height: 1.5; }
 .boot-retry { flex: none; margin-top: 8px; }
 `;

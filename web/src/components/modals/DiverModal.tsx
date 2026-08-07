@@ -194,7 +194,7 @@ export function DiverModal({
               </div>
             ))
           ) : (
-            <div className="v" style={{ color: 'var(--ink-mute)' }}>
+            <div className="v" style={{ color: 'var(--text-mute)' }}>
               None currently assigned.
             </div>
           )}

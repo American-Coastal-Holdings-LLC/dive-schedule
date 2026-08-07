@@ -12,69 +12,56 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEV_USERS, buildDevToken, findDevUser } from '@/lib/platform/dev-users';
 
+// The wire shape the real platform sends; mirrored from bridge.ts so the harness cannot drift.
+interface HostTheme {
+  mode: 'light' | 'dark';
+  colors: Record<string, string>;
+}
+
 const PREFIX = 'dive-bridge:';
 
-// Two clearly-distinct host theme maps applied to the app's :root at runtime. The app applies
-// whatever the host sends (setProperty), so these override the stylesheet defaults — proving theming
-// is host-driven, not just prefers-color-scheme.
-const LIGHT_THEME: Record<string, string> = {
-  '--brand': '#14315e',
-  '--brand-600': '#1b4a86',
-  '--brand-700': '#0f2547',
-  '--accent': '#1f5fe0',
-  '--accent-strong': '#1a4ec4',
-  '--accent-ink': '#1546a6',
-  '--accent-soft': '#eaf1ff',
-  '--accent-line': '#cfddfb',
-  '--ink': '#0c1a33',
-  '--ink-soft': '#46536b',
-  '--ink-mute': '#8794aa',
-  '--line': '#e4eaf3',
-  '--line-soft': '#eef2f9',
-  '--line-strong': '#d2dcea',
-  '--surface': '#ffffff',
-  '--surface-2': '#f6f9ff',
-  '--bg': '#f3f6fc',
-  '--success': '#0e8f68',
-  '--success-soft': '#e6f6ef',
-  '--success-line': '#c6e8d8',
-  '--danger': '#d63a49',
-  '--danger-strong': '#b4242f',
-  '--danger-ink': '#a71f2b',
-  '--danger-soft': '#fdecee',
-  '--danger-line': '#f4cdd2',
-  '--toast-bg': '#14213a',
-  '--toast-ink': '#ffffff',
+// Two host themes, expressed in the SEMANTIC token shape EOS actually sends —
+// `{ mode, colors: { background, foreground, primary, border, ... } }` — not in our private CSS
+// variable names. That is the whole point of this control: it proves bridge.ts -> themeToCss maps
+// the host's vocabulary onto ours, and that globals.css can re-theme the entire app (surfaces,
+// hairlines, status tints, scrim, toast) by DERIVING from these few inputs.
+//
+// If you add a colour here, you are testing the mapper. If you find yourself wanting to add a
+// token that is not in this list to make some component look right, that component is hard-coding
+// a colour instead of deriving one — fix the component, not this fixture.
+const LIGHT_THEME: HostTheme = {
+  mode: 'light',
+  colors: {
+    background: '#f3f6fc',
+    surface: '#ffffff',
+    foreground: '#0c1a33',
+    muted: '#8794aa',
+    border: '#e4eaf3',
+    primary: '#1f5fe0',
+    primaryContrast: '#ffffff',
+    danger: '#d63a49',
+    success: '#0e8f68',
+    warning: '#c7871b',
+  },
 };
 
-const DARK_THEME: Record<string, string> = {
-  '--brand': '#142a49',
-  '--brand-600': '#1d3f68',
-  '--brand-700': '#0c1c34',
-  '--accent': '#4b83ff',
-  '--accent-strong': '#6a99ff',
-  '--accent-ink': '#a9c6ff',
-  '--accent-soft': 'rgba(75, 131, 255, .15)',
-  '--accent-line': 'rgba(75, 131, 255, .34)',
-  '--ink': '#e9f0fb',
-  '--ink-soft': '#a7b4ca',
-  '--ink-mute': '#6d7d97',
-  '--line': '#24324b',
-  '--line-soft': '#1a2740',
-  '--line-strong': '#32425f',
-  '--surface': '#121d31',
-  '--surface-2': '#17233c',
-  '--bg': '#0a1120',
-  '--success': '#34d8a0',
-  '--success-soft': 'rgba(46, 200, 150, .15)',
-  '--success-line': 'rgba(46, 200, 150, .32)',
-  '--danger': '#ff6b78',
-  '--danger-strong': '#ff8a94',
-  '--danger-ink': '#ff8a94',
-  '--danger-soft': 'rgba(255, 90, 105, .15)',
-  '--danger-line': 'rgba(255, 90, 105, .34)',
-  '--toast-bg': '#26374f',
-  '--toast-ink': '#eef3fb',
+// Deliberately NOT our navy dark theme: a washed slate-and-amber palette no rule in globals.css
+// contains. If the app still reads correctly under this, the derivation is genuinely working
+// rather than quietly falling back to our own dark literals.
+const DARK_THEME: HostTheme = {
+  mode: 'dark',
+  colors: {
+    background: '#12141a',
+    surface: '#1c1f27',
+    foreground: '#eceef5',
+    muted: '#8a8f9e',
+    border: '#2f3441',
+    primary: '#e0a63a',
+    primaryContrast: '#1a1206',
+    danger: '#f2686b',
+    success: '#4ec9a0',
+    warning: '#e0a63a',
+  },
 };
 
 interface LogEntry {
@@ -142,8 +129,8 @@ export default function HarnessPage() {
           break;
         }
         case 'request-theme': {
-          const vars = themeMap(themeRef.current);
-          reply(event.source, { type: `${PREFIX}theme`, requestId: data.requestId, vars }, `theme → ${themeRef.current}`);
+          const theme = themeMap(themeRef.current);
+          reply(event.source, { type: `${PREFIX}theme`, requestId: data.requestId, ...theme }, `theme → ${themeRef.current}`);
           break;
         }
         case 'toast':
@@ -169,7 +156,7 @@ export default function HarnessPage() {
     themeRef.current = t;
     const win = iframeRef.current?.contentWindow;
     if (win) {
-      win.postMessage({ type: `${PREFIX}theme`, vars: themeMap(t) }, window.location.origin);
+      win.postMessage({ type: `${PREFIX}theme`, ...themeMap(t) }, window.location.origin);
       pushLog('out', `theme push → ${t}`);
     }
   };

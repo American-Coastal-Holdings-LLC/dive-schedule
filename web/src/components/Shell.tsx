@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react';
 import { usePermissions } from './PermissionsProvider';
 import { Icon } from './Icon';
 import { PERMISSIONS as P } from '@/lib/permissions';
+import { BRAND } from '@/lib/brand';
 import { JobsTab } from './tabs/JobsTab';
 import { RecordsTab } from './tabs/RecordsTab';
 import { ChecksTab } from './tabs/ChecksTab';
@@ -47,8 +48,10 @@ export function Shell() {
           <Icon name="anchor" />
         </div>
         <div className="title">
-          <h1>Dive Schedule</h1>
-          <div className="subtitle">Dockside operations</div>
+          {/* Product name from lib/brand.ts, never a literal — see that file on why the
+              TENANT's name must not be rendered here. */}
+          <h1>{BRAND.name}</h1>
+          <div className="subtitle">{BRAND.tagline}</div>
         </div>
         <div className="who">
           <Icon name="user" />
@@ -57,24 +60,49 @@ export function Shell() {
       </header>
 
       {visibleTabs.length > 1 ? (
-        <div className="tabs" role="tablist">
-          {visibleTabs.map((t) => (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={t.key === current?.key}
-              className={t.key === current?.key ? 'tab-btn active' : 'tab-btn'}
-              onClick={() => setActive(t.key)}
-            >
-              {t.label}
-            </button>
-          ))}
+        // A real tablist: roving tabindex + arrow keys, so the bar is operable from the keyboard
+        // and announces itself. Previously every tab was a tab stop with no arrow handling, which
+        // is the one interaction a screen-reader user has to get through to reach any screen.
+        <div className="tabs" role="tablist" aria-label={`${BRAND.name} sections`}>
+          {visibleTabs.map((t) => {
+            const selected = t.key === current?.key;
+            return (
+              <button
+                key={t.key}
+                id={`tab-${t.key}`}
+                role="tab"
+                type="button"
+                aria-selected={selected}
+                aria-controls={`panel-${t.key}`}
+                tabIndex={selected ? 0 : -1}
+                className={selected ? 'tab-btn active' : 'tab-btn'}
+                onClick={() => setActive(t.key)}
+                onKeyDown={(e) => {
+                  const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+                  if (!delta) return;
+                  e.preventDefault();
+                  const i = visibleTabs.findIndex((x) => x.key === current?.key);
+                  const next = visibleTabs[(i + delta + visibleTabs.length) % visibleTabs.length];
+                  setActive(next.key);
+                  document.getElementById(`tab-${next.key}`)?.focus();
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
         </div>
       ) : null}
 
       <main>
         {Active ? (
-          <div className="tab-content" key={current?.key}>
+          <div
+            className="tab-content"
+            key={current?.key}
+            id={`panel-${current?.key}`}
+            role="tabpanel"
+            aria-labelledby={`tab-${current?.key}`}
+          >
             <Active />
           </div>
         ) : (

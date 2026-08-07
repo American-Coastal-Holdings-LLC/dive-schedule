@@ -30,6 +30,61 @@ const DEV_USER_STORAGE_KEY = 'dive.devUser';
 type ThemeListener = (vars: Record<string, string>) => void;
 const themeListeners = new Set<ThemeListener>();
 
+// Host theme -> our CSS custom properties.
+//
+// EOS does not send CSS variable names. It sends a SEMANTIC token object —
+// `{ mode, colors: { background, foreground, primary, border, ... } }` — and the names it uses are
+// not the names our stylesheet uses. Without this mapping a pushed theme lands on properties no
+// rule reads (`--background`, `--foreground`), so the app silently keeps its own palette: a host
+// in dark mode would render our light surfaces inside its dark chrome.
+//
+// Only the keys that actually arrived are emitted. Everything we do NOT map is derived from these
+// inputs by globals.css (see its CONTRACT header), so four colours are enough to re-theme the app.
+//
+// Both shapes are accepted: the semantic object above, and a plain `--foo` map. The plain map is
+// what /harness sends and is also the escape hatch for a host that wants to set a token we have
+// not given a semantic name to.
+interface HostTheme {
+  mode?: string;
+  colors?: Record<string, string>;
+  vars?: Record<string, string>;
+}
+
+export function themeToCss(theme: HostTheme | null | undefined): Record<string, string> {
+  if (!theme) return {};
+  const colors = theme.colors ?? {};
+  const out: Record<string, string> = {};
+  const put = (name: string, value: string | undefined): void => {
+    if (typeof value === 'string' && value.trim()) out[name] = value;
+  };
+
+  put('--bg', colors.background);
+  put('--surface', colors.surface);
+  put('--text', colors.foreground);
+  put('--muted', colors.muted);
+  put('--border', colors.border);
+  put('--primary', colors.primary);
+  put('--primary-contrast', colors.primaryContrast);
+  put('--accent', colors.accent);
+  put('--danger', colors.danger);
+  put('--ok', colors.success ?? colors.ok);
+  put('--warn', colors.warning ?? colors.warn);
+
+  // The token shape is additive: pass through any explicit custom property the host sets, from
+  // either container, while tolerating semantic colours we do not yet consume.
+  for (const [key, value] of Object.entries(colors)) {
+    if (key.startsWith('--') && typeof value === 'string') out[key] = value;
+  }
+  for (const [key, value] of Object.entries(theme.vars ?? {})) {
+    if (typeof value === 'string') out[key.startsWith('--') ? key : `--${key}`] = value;
+  }
+
+  // Mode is a hook, not a colour: globals.css keys `:root[data-eos-mode='dark']` off it so the
+  // host can be dark while the OS is light. PlatformProvider sets the attribute.
+  if (theme.mode === 'dark' || theme.mode === 'light') out['--eos-mode'] = theme.mode;
+  return out;
+}
+
 interface Pending {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
@@ -95,7 +150,7 @@ class IframeBridge implements PlatformBridge {
 
     // A pushed theme (no/unknown requestId) re-themes the app live.
     if (verb === 'theme') {
-      const vars = (data.vars as Record<string, string>) || {};
+      const vars = themeToCss(data as HostTheme);
       themeListeners.forEach((cb) => {
         try {
           cb(vars);
@@ -141,8 +196,8 @@ class IframeBridge implements PlatformBridge {
   async getTheme(): Promise<Record<string, string>> {
     // Theme is non-fatal: a timeout falls back to stylesheet defaults rather than blocking the app.
     try {
-      const reply = await this.request<{ vars?: Record<string, string> }>('request-theme', 'theme');
-      return reply.vars || {};
+      const reply = await this.request<HostTheme>('request-theme', 'theme');
+      return themeToCss(reply);
     } catch {
       return {};
     }

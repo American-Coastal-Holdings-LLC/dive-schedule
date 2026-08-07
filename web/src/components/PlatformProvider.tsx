@@ -15,10 +15,19 @@ interface PlatformContextValue {
 
 const PlatformContext = createContext<PlatformContextValue | null>(null);
 
+// The map arriving here has already been normalised to our CSS custom-property names by
+// bridge.ts -> themeToCss. Setting them as INLINE styles on :root is what makes them outrank
+// globals.css; every token the host does not send stays derived from the ones it does.
 function applyTheme(vars: Record<string, string>) {
   const root = document.documentElement;
   for (const [key, value] of Object.entries(vars)) {
     if (!value) continue;
+    // --eos-mode is a signal, not a colour: it drives the :root[data-eos-mode='dark'] hook so a
+    // dark host renders dark even when the OS is in light mode (and vice versa).
+    if (key === '--eos-mode') {
+      root.setAttribute('data-eos-mode', value);
+      continue;
+    }
     const prop = key.startsWith('--') ? key : `--${key}`;
     root.style.setProperty(prop, value);
   }

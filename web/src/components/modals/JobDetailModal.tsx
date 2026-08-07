@@ -275,7 +275,7 @@ export function JobDetailModal({
               <Icon name="calendar" />
               {status.label}
             </span>
-            <span style={{ color: 'var(--ink-mute)' }}>
+            <span style={{ color: 'var(--text-mute)' }}>
               {rotationLabel(job.rotation)} · due {formatDate(job.dueDate)}
             </span>
           </div>

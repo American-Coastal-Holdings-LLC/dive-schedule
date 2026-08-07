@@ -6,7 +6,7 @@
   "scripts": {
     "build": "nest build",
     "start": "node dist/main.js",
-    "start:dev": "NODE_ENV=development nest start --watch",
+    "start:dev": "NODE_ENV=development USE_DEV_IDENTITY_STUB=true USE_DEV_WEBHOOK_STUB=true USE_DEV_PLATFORM_STUBS=true nest start --watch",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
@@ -24,6 +24,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "helmet": "^8.0.0",
+    "jose": "^6.2.8",
     "nestjs-pino": "^4.2.0",
     "pino-http": "^10.3.0",
     "reflect-metadata": "^0.2.2",
@@ -31,6 +32,7 @@
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.10.5",
     "pino-pretty": "^13.0.0",
     "prisma": "^6.2.1",

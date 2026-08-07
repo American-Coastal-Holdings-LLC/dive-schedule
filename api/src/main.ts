@@ -8,7 +8,12 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody: true makes Nest retain the exact request bytes on `req.rawBody` alongside the parsed
+  // body. The webhook signature (contract §8) is computed over those bytes, so verifying against a
+  // re-serialized body would fail on any whitespace or key-order difference — and would accept a
+  // reordered payload carrying a stale signature. This flag is load-bearing security, not a tuning
+  // knob; removing it makes HmacWebhookVerifier reject every delivery.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
   // Route Nest logging through pino.
   app.useLogger(app.get(Logger));

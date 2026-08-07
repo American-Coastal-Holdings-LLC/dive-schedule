@@ -1,0 +1,15 @@
+# Keep the build context small and keep local secrets/state out of the image entirely.
+**/node_modules
+**/.next
+**/dist
+.git
+.build
+legacy
+docs
+*.md
+!README.md
+
+# Never ship real env files — all runtime config comes from /opt/vendor/.env on the VM.
+**/.env
+**/.env.local
+**/.env.*.local

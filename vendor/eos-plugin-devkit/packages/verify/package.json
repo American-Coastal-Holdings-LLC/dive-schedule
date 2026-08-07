@@ -1,0 +1,42 @@
+{
+  "name": "@eos/plugin-verify",
+  "version": "0.1.0",
+  "description": "EOS server-side verification helpers — JWKS fetch/cache, bridge-token verification (alg-pinned, live-state), and webhook HMAC verification (contract 02 §5 steps 1-3 + §8; PLUGIN_SECURITY_REQUIREMENTS gates D & I).",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "jose": "^5.9.6"
+  },
+  "devDependencies": {
+    "@eos/plugin-stub-kit": "*"
+  }
+}

@@ -12,6 +12,9 @@ const API_URL = process.env.API_URL ?? 'http://localhost:4310';
 const FRAME_ANCESTORS = (process.env.FRAME_ANCESTORS ?? "'self'").trim();
 
 const nextConfig: NextConfig = {
+  // Standalone output: a self-contained server.js plus a pruned node_modules, which is what the
+  // Docker runtime stage copies. Without this the runtime image needs the whole dependency tree.
+  output: 'standalone',
   async rewrites() {
     return [
       { source: '/api/:path*', destination: `${API_URL}/api/:path*` },

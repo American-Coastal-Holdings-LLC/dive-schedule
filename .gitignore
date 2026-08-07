@@ -27,3 +27,6 @@ dist/
 
 # Local build orchestration (workflow scripts, logs) — not part of the deliverable
 .build/
+
+# Generated submission copy (scripts/make-submission-manifest.mjs) — manifest.json is the source.
+manifest.submit.json

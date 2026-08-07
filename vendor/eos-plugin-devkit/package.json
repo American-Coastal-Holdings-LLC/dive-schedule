@@ -1,0 +1,25 @@
+{
+  "name": "eos-plugin-devkit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EOS plugin developer kit \u2014 bridge client, server-side verify helpers, and a pre-availability stub kit + sample plugin. Builds only against the frozen vendor integration contract (platform-plugins/02).",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run typecheck",
+    "test": "npm run test --workspaces --if-present",
+    "clean": "npm run clean --workspaces --if-present",
+    "smoke": "echo \"smoke harness is delivered by the stub-kit + sample-plugin agents (see README > Smoke)\" && exit 0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "$comment": [
+    "EOS plugin registration for Dive Schedule, an American Coastal Holdings plugin.",
+    "HOST: vendor box provisioned 2026-08-07 — Lightsail eos-vendor-diveschedule, static IP",
+    "3.219.250.121, hosting slug 'diveschedule'. The DNS label matches the hosting slug, as with",
+    "sprocketsuite.34.225.80.4.sslip.io. This origin must stay in step with NEXT_PUBLIC_APP_ORIGIN",
+    "(a BUILD arg on the box) — they are the same origin in two places and disagreement breaks the",
+    "embed silently. CSP_FRAME_ANCESTORS is NOT this origin: it is the workspace origin allowed to",
+    "frame us.",
+    "PERMISSION KEYS: declared BARE, per contract §2 — 'you write jobs.read; it registers as",
+    "ext.<vendorSlug>.<pluginSlug>.jobs.read'. The platform namespaces them on registration, and the",
+    "bridge token carries the ext-namespaced form. api/src/auth/permissions.ts holds the internal",
+    "'dive.*' guard form plus fullKey()/stripNamespace() to convert at the wire seam. All three forms",
+    "must stay in step: bare here, 'dive.*' in the guards, ext.* on the wire.",
+    "PLUGIN SLUG: 'dive' is PROPOSED, not assigned. EOS assigns it at registration and it is",
+    "immutable thereafter; if they assign something else, update INTERNAL_PERMISSION_PREFIX and this",
+    "manifest's name together."
+  ],
+
+  "name": "DiveSchedule",
+  "majorVersion": 1,
+  "displayName": "Dive Schedule",
+  "description": "Dive-operations system for commercial hull-cleaning outfits: recurring boat rotations, a checklist-and-certify workflow with an immutable service record per cleaning, crew pay, point-of-sale against inventory, and an income/expense ledger.",
+
+  "embed": {
+    "url": "https://diveschedule.3.219.250.121.sslip.io/",
+    "origin": "https://diveschedule.3.219.250.121.sslip.io"
+  },
+
+  "permissions": [
+    { "key": "jobs.view-all", "displayName": "View all jobs", "description": "See every scheduled cleaning job on the board, for every boat and diver." },
+    { "key": "jobs.view-assigned", "displayName": "View assigned jobs", "description": "See only the jobs this diver is assigned to." },
+    { "key": "jobs.manage", "displayName": "Manage jobs", "description": "Create, edit, reschedule, assign and delete cleaning jobs and their rotations." },
+    { "key": "jobs.complete", "displayName": "Complete jobs", "description": "Work a job: run the checklist, attach proof photos and video, and certify it complete." },
+    { "key": "jobs.view-pricing", "displayName": "View job pricing", "description": "See the price and estimate figures on a job (hidden from divers who only work them)." },
+    { "key": "checklist.manage", "displayName": "Manage checklist", "description": "Edit the shop's cleaning checklist template that every job is worked against." },
+    { "key": "records.view", "displayName": "View service records", "description": "See the immutable service record produced by each completed cleaning." },
+    { "key": "records.send", "displayName": "Send service records", "description": "Send a completed service record to the boat owner." },
+    { "key": "records.manage", "displayName": "Manage service records", "description": "Correct or delete service records." },
+    { "key": "crew.view", "displayName": "View crew", "description": "See the diver roster, certifications and contact details." },
+    { "key": "crew.manage", "displayName": "Manage crew", "description": "Add and edit diver profiles, certifications and pay rates." },
+    { "key": "pay.view-own", "displayName": "View own pay", "description": "See this diver's own weekly earnings breakdown." },
+    { "key": "pay.view-all", "displayName": "View all pay", "description": "See weekly pay for the whole crew." },
+    { "key": "pos.use", "displayName": "Take payment", "description": "Run the point of sale: take cash payment against inventory and record the sale." },
+    { "key": "finance.view", "displayName": "View finance", "description": "See revenue, the income/expense ledger and the trend report." },
+    { "key": "finance.manage", "displayName": "Manage finance", "description": "Add and delete ledger entries." },
+    { "key": "inventory.view", "displayName": "View inventory", "description": "See parts, tools and stock levels." },
+    { "key": "inventory.manage", "displayName": "Manage inventory", "description": "Add, edit, delete and restock inventory items." },
+    { "key": "settings.manage", "displayName": "Manage settings", "description": "Change app settings: rates, templates and thresholds." }
+  ],
+
+  "scopes": [
+    { "scope": "tenant.read", "purpose": "Read the dive operation's display name and timezone for service-record headers and for the weekly pay-period boundaries." },
+    { "scope": "users.read", "purpose": "Resolve divers to platform users for job assignment, completed-by attribution on service records, and weekly pay reporting." },
+    { "scope": "permissions.read", "purpose": "Gate every job, record, pay, POS, finance and inventory action server-side against the signed-in user's effective plugin permissions (e.g. a diver sees only assigned jobs and their own pay)." },
+    { "scope": "subscription.read", "purpose": "Drive suspended/past-due UX from real platform subscription state instead of a local gate." }
+  ],
+
+  "$comment_webhooks": "installation.deleted drives the full per-installation cascade delete (the 30-day deletion obligation, contract §11). The subscription events are received and logged today; the entitlement UX that consumes them is not built yet.",
+  "$comment_sensitiveScopes": "Empty on purpose. Contract §9 makes an independent penetration test a GATE on the first production grant of any sensitive-tier scope, pilots included. Nothing here needs PII-populated users/tenant today: divers are resolved by platform user id, and service records carry the boat, not the owner's personal data. Do not add an entry without booking that pen test first.",
+  "sensitiveScopes": [],
+
+  "webhooks": {
+    "endpointUrls": ["https://diveschedule.3.219.250.121.sslip.io/webhooks/platform"],
+    "eventTypes": [
+      "installation.created",
+      "installation.deleted",
+      "subscription.activated",
+      "subscription.trial_started",
+      "subscription.expired",
+      "subscription.canceled"
+    ]
+  },
+
+  "oauth": {
+    "redirect_uris": ["https://diveschedule.3.219.250.121.sslip.io/oauth/callback"]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@eos/plugin-bridge",
+  "version": "0.1.0",
+  "description": "EOS bridge client — the framework-agnostic library a plugin iframe imports to complete the MessageChannel handshake and call the bridge JS API (contract 02 §5). Ships real and stub modes behind one config flag.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  }
+}

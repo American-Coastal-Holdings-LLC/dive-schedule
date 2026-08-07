@@ -1,0 +1,62 @@
+{
+  "name": "@eos/plugin-stub-kit",
+  "version": "0.1.0",
+  "description": "EOS pre-availability dev-kit tooling (contract 02 §13) — test ES256 JWKS + sample bridge/access token minting (incl. negative fixtures), a webhook simulator CLI, and a local OAuth2 (Authorization Code + PKCE) stub server. Test keys/tokens/credentials are clearly non-production and never valid against the real platform.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "eos-webhook-sim": "./dist/bin/webhook-sim.js",
+    "eos-oauth-stub": "./dist/bin/oauth-stub.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./webhook-sim": {
+      "types": "./src/webhook-sim.ts",
+      "default": "./src/webhook-sim.ts"
+    },
+    "./oauth-stub": {
+      "types": "./src/oauth-stub.ts",
+      "default": "./src/oauth-stub.ts"
+    }
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./webhook-sim": {
+        "types": "./dist/webhook-sim.d.ts",
+        "default": "./dist/webhook-sim.js"
+      },
+      "./oauth-stub": {
+        "types": "./dist/oauth-stub.d.ts",
+        "default": "./dist/oauth-stub.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "webhook-sim": "node dist/bin/webhook-sim.js",
+    "oauth-stub": "node dist/bin/oauth-stub.js"
+  },
+  "dependencies": {
+    "@eos/plugin-verify": "*",
+    "jose": "^5.9.6"
+  }
+}

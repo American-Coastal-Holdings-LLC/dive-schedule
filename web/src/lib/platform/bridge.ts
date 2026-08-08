@@ -1,17 +1,26 @@
-// The platform bridge — the single seam between this app and its host. Feature code imports only
-// the PlatformBridge interface; the concrete implementation is chosen at runtime.
+// The platform bridge — the ONLY seam between this app and its host.
 //
-//   - IframeBridge      : real host path. Talks to the parent window via postMessage using the
-//                         envelope { type: "dive-bridge:<verb>", requestId?, ...payload }.
-//                         Child->parent verbs: ready, request-token, request-theme, toast, resize.
-//                         Parent->child replies: token, theme (theme may also be pushed unsolicited
-//                         so a live host theme toggle re-themes the app). 5s timeout -> rejection.
-//   - StandaloneDevBridge : DEV fallback when the app is NOT framed. Mints a devtoken for the user
-//                           in ?devUser= / localStorage (default dana); theme = stylesheet defaults.
+// WHY THIS WAS REWRITTEN. The first version spoke a homegrown protocol
+// (`dive-bridge:<verb>` envelopes over window.postMessage) invented alongside the dev harness that
+// answered it. Both sides agreed perfectly, every local test passed, and it was incompatible with
+// the actual platform: EOS speaks `eos.bridge/1`, whose handshake transfers a MessagePort via a
+// `handshake/init` on window and expects a `handshake/ack` back over that port. The host waited for
+// an ack this app had no code to send, timed out three times, and the embed rendered
+// "Could not reach the platform" — which named the wrong subsystem entirely.
 //
-// No frame-busting, no window.top access, no cookies, no service worker. Identity tokens live in
-// memory only (never persisted); only the dev-user *key* may sit in localStorage for the dev bridge.
+// The lesson is in the failure mode, not the protocol: a self-authored harness can only ever prove
+// the app agrees with itself. This now uses the platform's own client, so the wire format is
+// theirs, not ours.
+//
+// WHAT DID NOT CHANGE: the PlatformBridge interface below. api.ts and PlatformProvider are
+// untouched — the seam was the right shape, only the transport behind it was wrong.
+//
+// MODES. Framed → `real`, pinned to the workspace origin. Unframed (the /harness page, a bare
+// localhost tab) → the official client's own `stub` mode, which synthesizes the port and answers
+// every method locally. We no longer maintain a second implementation for dev; running the same
+// client both ways is the point.
 
+import { BridgeClient, type ThemeTokens } from '@eos/plugin-bridge';
 import { buildDevToken, DEFAULT_DEV_USER_KEY, findDevUser } from './dev-users';
 
 export interface PlatformBridge {
@@ -21,29 +30,46 @@ export interface PlatformBridge {
   requestResize(heightPx: number): void;
 }
 
-const ENVELOPE_PREFIX = 'dive-bridge:';
-const REQUEST_TIMEOUT_MS = 5000;
-const DEV_USER_STORAGE_KEY = 'dive.devUser';
-
-// Theme subscribers are module-scoped so subscribeTheme works uniformly regardless of which bridge
-// is active; only IframeBridge ever notifies them (on a pushed theme map).
+// Theme subscribers are module-scoped so subscribeTheme works regardless of which mode is active.
 type ThemeListener = (vars: Record<string, string>) => void;
 const themeListeners = new Set<ThemeListener>();
 
+/**
+ * The EOS workspace origin. Outbound messages pin `targetOrigin` to it and inbound messages are
+ * validated against it, so the identity token can never be posted to, or accepted from, an
+ * unexpected frame.
+ *
+ * MUST be a build arg (NEXT_PUBLIC_* is inlined at build time). Set only at runtime it silently
+ * ships the default, the client pins to our own origin, and every message to the host is refused by
+ * the browser as an origin mismatch — see the Dockerfile note.
+ */
+function hostOrigin(): string {
+  const configured = (process.env.NEXT_PUBLIC_PLATFORM_ORIGIN || '').trim();
+  if (configured) return configured.replace(/\/$/, '');
+  if (typeof window !== 'undefined') return window.location.origin;
+  return '';
+}
+
+/** True when running inside a host frame. Decides real vs stub. */
+export function isFramed(): boolean {
+  try {
+    return typeof window !== 'undefined' && window.parent !== window;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Host theme -> our CSS custom properties.
 //
-// EOS does not send CSS variable names. It sends a SEMANTIC token object —
-// `{ mode, colors: { background, foreground, primary, border, ... } }` — and the names it uses are
+// EOS does not send CSS variable names. It sends a SEMANTIC token object and the names it uses are
 // not the names our stylesheet uses. Without this mapping a pushed theme lands on properties no
-// rule reads (`--background`, `--foreground`), so the app silently keeps its own palette: a host
-// in dark mode would render our light surfaces inside its dark chrome.
+// rule reads, so the app silently keeps its own palette — a host in dark mode would render our
+// light surfaces inside its dark chrome.
 //
-// Only the keys that actually arrived are emitted. Everything we do NOT map is derived from these
-// inputs by globals.css (see its CONTRACT header), so four colours are enough to re-theme the app.
-//
-// Both shapes are accepted: the semantic object above, and a plain `--foo` map. The plain map is
-// what /harness sends and is also the escape hatch for a host that wants to set a token we have
-// not given a semantic name to.
+// Only keys that actually arrived are emitted; everything unmapped is derived by globals.css from
+// these inputs, so a handful of colours re-themes the whole app.
+// ---------------------------------------------------------------------------
 interface HostTheme {
   mode?: string;
   colors?: Record<string, string>;
@@ -70,8 +96,8 @@ export function themeToCss(theme: HostTheme | null | undefined): Record<string, 
   put('--ok', colors.success ?? colors.ok);
   put('--warn', colors.warning ?? colors.warn);
 
-  // The token shape is additive: pass through any explicit custom property the host sets, from
-  // either container, while tolerating semantic colours we do not yet consume.
+  // The token shape is additive: pass through explicit custom properties from either container
+  // while tolerating semantic colours we do not yet consume.
   for (const [key, value] of Object.entries(colors)) {
     if (key.startsWith('--') && typeof value === 'string') out[key] = value;
   }
@@ -79,202 +105,157 @@ export function themeToCss(theme: HostTheme | null | undefined): Record<string, 
     if (typeof value === 'string') out[key.startsWith('--') ? key : `--${key}`] = value;
   }
 
-  // Mode is a hook, not a colour: globals.css keys `:root[data-eos-mode='dark']` off it so the
-  // host can be dark while the OS is light. PlatformProvider sets the attribute.
+  // Mode is a hook, not a colour: globals.css keys :root[data-eos-mode='dark'] off it so the host
+  // can be dark while the OS is light. PlatformProvider sets the attribute.
   if (theme.mode === 'dark' || theme.mode === 'light') out['--eos-mode'] = theme.mode;
   return out;
 }
 
-interface Pending {
-  resolve: (value: unknown) => void;
-  reject: (reason: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-  replyType: string;
+// ---------------------------------------------------------------------------
+// Replay of the parse-time handshake buffer.
+//
+// layout.tsx catches `handshake/init` from HTML-parse time because the host's MessagePort is
+// TRANSFERRED and arrives once — possibly before this module exists. The official client does not
+// know about that buffer, so nothing consumes it unless we replay it here.
+//
+// ⛔ ORDER IS LOAD-BEARING — snapshot, tear down, THEN replay.
+// The catcher listens on `window`, and the replay below dispatches ON `window` with the buffered
+// event's own origin/data/port, which satisfies every check the catcher makes. A catcher still
+// armed during replay therefore re-buffers its own replay into the array being iterated: the loop
+// never terminates and allocates a MessageEvent per turn until the browser kills the frame. It
+// only bites when the host's handshake beats this module's startup — presenting as "refresh a few
+// times and it eventually loads" — and no boot deadline can catch it, because this runs
+// synchronously before any timer exists.
+// ---------------------------------------------------------------------------
+interface BufferedHandshake {
+  data: unknown;
+  origin: string;
+  source: MessageEventSource | null;
+  port: MessagePort;
 }
 
-// The expected platform (host) origin for postMessage. The 5-minute identity token crosses this
-// channel, so it must be pinned: post ONLY to this origin (never '*') and accept messages ONLY from
-// it. Set NEXT_PUBLIC_PLATFORM_ORIGIN to the EOS workspace origin in production; in the same-origin
-// dev harness it falls back to this app's own origin. (The real EOS bridge SDK will replace this
-// hand-rolled channel with a MessageChannel port; until then this closes the token-exfiltration gap.)
-function platformOrigin(): string {
-  const configured = (process.env.NEXT_PUBLIC_PLATFORM_ORIGIN || '').trim();
-  if (configured) {
-    // Normalize so a trailing slash or case difference in the configured value doesn't silently break
-    // the pin — the browser's event.origin is always a bare, normalized origin.
-    try {
-      return new URL(configured).origin;
-    } catch {
-      /* misconfigured value: fall through to same-origin rather than pin to a bad string */
-    }
+declare global {
+  interface Window {
+    __eosPendingBridgeHandshakes?: BufferedHandshake[];
+    __eosBridgeBufferTeardown?: () => void;
   }
-  return typeof window !== 'undefined' ? window.location.origin : '';
 }
 
-class IframeBridge implements PlatformBridge {
-  private pending = new Map<string, Pending>();
-  private seq = 0;
-  private readonly hostOrigin = platformOrigin();
+function replayBufferedHandshakes(): void {
+  if (typeof window === 'undefined') return;
+  const buffered = window.__eosPendingBridgeHandshakes ?? [];
+  window.__eosBridgeBufferTeardown?.();
 
-  constructor() {
-    if (!process.env.NEXT_PUBLIC_PLATFORM_ORIGIN) {
-      // Framed but no explicit host origin configured: we pin to our own origin. Correct for the
-      // same-origin dev harness; for a cross-origin host this must be set (at build time) or the
-      // handshake silently times out instead of leaking anywhere.
-      console.warn(
-        `[bridge] NEXT_PUBLIC_PLATFORM_ORIGIN not set — pinning postMessage to ${this.hostOrigin}. ` +
-          'Set it at build time to the EOS host origin for a cross-origin embed.',
-      );
-    }
-    window.addEventListener('message', this.onMessage);
-    this.post('ready', {});
+  // Re-enter every buffered init through the client's ordinary listener so exact-origin and
+  // envelope checks stay single-sourced there. Replaying ALL of them means a hostile fake can never
+  // have evicted the genuine one — the client drops the ones that fail its checks.
+  for (const pending of buffered) {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: pending.data,
+        origin: pending.origin,
+        source: pending.source,
+        ports: [pending.port],
+      }),
+    );
   }
+}
 
-  private onMessage = (event: MessageEvent) => {
-    // Only trust messages from the pinned host origin — a foreign frame must not inject a token/theme.
-    if (event.origin !== this.hostOrigin) return;
-    const data = event.data;
-    if (!data || typeof data.type !== 'string' || !data.type.startsWith(ENVELOPE_PREFIX)) return;
-    const verb = data.type.slice(ENVELOPE_PREFIX.length);
+// ---------------------------------------------------------------------------
+// The client. One instance, created lazily, shared.
+// ---------------------------------------------------------------------------
+let clientPromise: Promise<BridgeClient> | undefined;
 
-    // Resolve a pending request if this message carries its requestId.
-    if (data.requestId && this.pending.has(data.requestId)) {
-      const p = this.pending.get(data.requestId)!;
-      if (verb === p.replyType) {
-        clearTimeout(p.timer);
-        this.pending.delete(data.requestId);
-        p.resolve(data);
-        return;
-      }
-    }
+function client(): Promise<BridgeClient> {
+  if (!clientPromise) {
+    const framed = isFramed();
+    const c = new BridgeClient({
+      mode: framed ? 'real' : 'stub',
+      hostOrigin: hostOrigin(),
+      // Stub fixtures mirror the dev users the API's dev-stub provider accepts, so an unframed run
+      // is a working app rather than an empty shell.
+      stub: framed
+        ? undefined
+        : {
+            identityToken: buildDevToken(findDevUser(DEFAULT_DEV_USER_KEY)),
+          },
+    });
 
-    // A pushed theme (no/unknown requestId) re-themes the app live.
-    if (verb === 'theme') {
-      const vars = themeToCss(data as HostTheme);
-      themeListeners.forEach((cb) => {
-        try {
-          cb(vars);
-        } catch {
-          /* listener errors must not break the bridge */
-        }
+    // connect() attaches its window listener SYNCHRONOUSLY, then waits. So start it, replay the
+    // buffered init into that listener, and only then await — replaying before connect() would hit
+    // no listener, and awaiting first would deadlock when the init already arrived and will never
+    // be sent again.
+    const connected = c.connect();
+    replayBufferedHandshakes();
+
+    clientPromise = connected.then(() => {
+      // A pushed theme re-themes the app live (a host toggling dark mode mid-session).
+      c.on('theme.changed', (tokens) => {
+        const vars = themeToCss(tokens as HostTheme);
+        themeListeners.forEach((cb) => {
+          try {
+            cb(vars);
+          } catch {
+            /* one bad listener must not break the bridge */
+          }
+        });
       });
-    }
-  };
+      return c;
+    });
 
-  private post(verb: string, payload: Record<string, unknown>) {
-    try {
-      // Pin targetOrigin so the identity token is never broadcast to an unexpected parent frame.
-      window.parent.postMessage({ type: ENVELOPE_PREFIX + verb, ...payload }, this.hostOrigin);
-    } catch {
-      /* posting to the parent can throw in exotic sandboxes; treated as no-op */
-    }
-  }
-
-  private request<T>(verb: string, replyType: string, payload: Record<string, unknown> = {}): Promise<T> {
-    const requestId = `${Date.now().toString(36)}-${(this.seq++).toString(36)}`;
-    return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(requestId);
-        reject(new Error(`Platform bridge timed out waiting for "${replyType}".`));
-      }, REQUEST_TIMEOUT_MS);
-      this.pending.set(requestId, {
-        resolve: resolve as (value: unknown) => void,
-        reject,
-        timer,
-        replyType,
-      });
-      this.post(verb, { requestId, ...payload });
+    // A failed connect must not be cached as a permanently rejected promise — the host may simply
+    // have been slow. Clear it so the next call retries.
+    clientPromise.catch(() => {
+      clientPromise = undefined;
     });
   }
+  return clientPromise;
+}
 
+const bridge: PlatformBridge = {
   async getIdentityToken(): Promise<string> {
-    const reply = await this.request<{ token?: string }>('request-token', 'token');
-    if (!reply.token) throw new Error('Platform bridge returned no identity token.');
-    return reply.token;
-  }
+    const c = await client();
+    const { token } = await c.getIdentityToken();
+    if (!token) throw new Error('Platform bridge returned no identity token.');
+    return token;
+  },
 
   async getTheme(): Promise<Record<string, string>> {
-    // Theme is non-fatal: a timeout falls back to stylesheet defaults rather than blocking the app.
+    // Theme is non-fatal: a failure falls back to the stylesheet defaults rather than blocking the
+    // app, which is a cosmetic degradation instead of a blank screen.
     try {
-      const reply = await this.request<HostTheme>('request-theme', 'theme');
-      return themeToCss(reply);
+      const c = await client();
+      const tokens: ThemeTokens = await c.getThemeTokens();
+      return themeToCss(tokens as HostTheme);
     } catch {
       return {};
     }
-  }
+  },
 
   toast(message: string): void {
-    this.post('toast', { message });
-  }
+    if (!message) return;
+    void client()
+      .then((c) => c.toast({ message }))
+      .catch(() => {
+        /* best-effort; the in-app toast still renders */
+      });
+  },
 
   requestResize(heightPx: number): void {
-    this.post('resize', { height: Math.max(0, Math.round(heightPx)) });
-  }
-}
-
-class StandaloneDevBridge implements PlatformBridge {
-  private currentUserKey(): string {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const fromQuery = params.get('devUser');
-      if (fromQuery) {
-        try {
-          window.localStorage.setItem(DEV_USER_STORAGE_KEY, fromQuery);
-        } catch {
-          /* storage may be unavailable */
-        }
-        return fromQuery;
-      }
-      const stored = window.localStorage.getItem(DEV_USER_STORAGE_KEY);
-      if (stored) return stored;
-    } catch {
-      /* ignore */
-    }
-    return DEFAULT_DEV_USER_KEY;
-  }
-
-  async getIdentityToken(): Promise<string> {
-    return buildDevToken(findDevUser(this.currentUserKey()));
-  }
-
-  async getTheme(): Promise<Record<string, string>> {
-    return {}; // stylesheet defaults (prefers-color-scheme)
-  }
-
-  toast(message: string): void {
-    // Un-framed dev: surfaced by the in-app toast host; log for visibility.
-    if (typeof console !== 'undefined') console.info('[toast]', message);
-  }
-
-  requestResize(): void {
-    /* no host to resize when un-framed */
-  }
-}
-
-let cached: PlatformBridge | null = null;
+    void client()
+      .then((c) => c.resize({ height: Math.max(0, Math.round(heightPx)) }))
+      .catch(() => {
+        /* the host clamps and may refuse; never fatal */
+      });
+  },
+};
 
 export function getBridge(): PlatformBridge {
-  if (cached) return cached;
-  if (typeof window === 'undefined') {
-    // Should never be exercised during SSR (all data fetching is client-side), but fail loudly.
-    return {
-      getIdentityToken: () => Promise.reject(new Error('Bridge unavailable during server render.')),
-      getTheme: () => Promise.resolve({}),
-      toast: () => {},
-      requestResize: () => {},
-    };
-  }
-  cached = window.parent !== window ? new IframeBridge() : new StandaloneDevBridge();
-  return cached;
+  return bridge;
 }
 
-// Subscribe to live theme pushes from the host (IframeBridge only). Returns an unsubscribe fn.
+/** Subscribe to live theme pushes from the host. Returns an unsubscribe fn. */
 export function subscribeTheme(cb: ThemeListener): () => void {
   themeListeners.add(cb);
   return () => themeListeners.delete(cb);
-}
-
-// True when running inside a host frame (affects whether live theme pushes are possible).
-export function isFramed(): boolean {
-  return typeof window !== 'undefined' && window.parent !== window;
 }

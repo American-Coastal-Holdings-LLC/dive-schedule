@@ -10,6 +10,7 @@
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BRIDGE_PROTOCOL } from '@eos/plugin-bridge';
 import { DEV_USERS, buildDevToken, findDevUser } from '@/lib/platform/dev-users';
 
 // The wire shape the real platform sends; mirrored from bridge.ts so the harness cannot drift.
@@ -18,7 +19,7 @@ interface HostTheme {
   colors: Record<string, string>;
 }
 
-const PREFIX = 'dive-bridge:';
+
 
 // Two host themes, expressed in the SEMANTIC token shape EOS actually sends —
 // `{ mode, colors: { background, foreground, primary, border, ... } }` — not in our private CSS
@@ -100,65 +101,128 @@ export default function HarnessPage() {
 
   const themeMap = useCallback((t: 'light' | 'dark') => (t === 'dark' ? DARK_THEME : LIGHT_THEME), []);
 
-  const reply = useCallback((source: MessageEventSource | null, message: Record<string, unknown>, note: string) => {
+  // ── The host side of eos.bridge/1 ────────────────────────────────────────────────────────
+  //
+  // This harness used to speak a private `dive-bridge:` protocol that the app also spoke, so the
+  // two agreed perfectly and BOTH were wrong: the real platform speaks eos.bridge/1, and the app
+  // failed on its first live embed with a handshake timeout. A harness that invents its own wire
+  // format can only prove the app agrees with itself, so this now implements the real one —
+  // MessageChannel handshake, request/response over the port, unsolicited events.
+  const portRef = useRef<MessagePort | null>(null);
+
+  const send = useCallback((msg: Record<string, unknown>, note: string) => {
     try {
-      // The harness embeds the app same-origin; pin the reply so the token isn't posted to '*'.
-      (source as Window | null)?.postMessage(message, window.location.origin);
+      portRef.current?.postMessage(msg);
       pushLog('out', note);
     } catch {
       /* ignore */
     }
   }, [pushLog]);
 
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      // Only accept bridge traffic from the same-origin embedded app.
-      if (event.origin !== window.location.origin) return;
-      const data = event.data;
-      if (!data || typeof data.type !== 'string' || !data.type.startsWith(PREFIX)) return;
-      const verb = data.type.slice(PREFIX.length);
+  // Answer a plugin request on the port. Mirrors the platform's method surface.
+  const onPortMessage = useCallback((event: MessageEvent) => {
+    const data = event.data as Record<string, unknown> | null;
+    if (!data || data.eos !== BRIDGE_PROTOCOL) return;
 
-      switch (verb) {
-        case 'ready':
-          pushLog('in', 'ready — app handshake');
-          break;
-        case 'request-token': {
-          const user = findDevUser(userKeyRef.current);
-          const token = buildDevToken(user);
-          reply(event.source, { type: `${PREFIX}token`, requestId: data.requestId, token }, `token → ${user.name}`);
-          break;
-        }
-        case 'request-theme': {
-          const theme = themeMap(themeRef.current);
-          reply(event.source, { type: `${PREFIX}theme`, requestId: data.requestId, ...theme }, `theme → ${themeRef.current}`);
-          break;
-        }
-        case 'toast':
-          pushLog('in', `toast — "${String(data.message ?? '')}"`);
-          break;
-        case 'resize': {
-          const h = Math.max(400, Math.round(Number(data.height) || 0));
-          setIframeHeight(h);
-          pushLog('in', `resize — ${h}px`);
-          break;
-        }
-        default:
-          pushLog('in', `${verb}`);
+    if (data.kind === 'handshake/ack') {
+      pushLog('in', `handshake/ack — channel live (client ${String(data.clientVersion ?? '?')})`);
+      return;
+    }
+    if (data.kind !== 'request') return;
+
+    const id = String(data.id ?? '');
+    const method = String(data.method ?? '');
+    const ok = (result: unknown, note: string) =>
+      send({ eos: BRIDGE_PROTOCOL, kind: 'response', id, ok: true, result }, note);
+
+    switch (method) {
+      case 'getIdentityToken': {
+        const user = findDevUser(userKeyRef.current);
+        // 5-minute expiry mirrors the real bridge token TTL so refresh logic is exercised.
+        ok({ token: buildDevToken(user), expiresAt: Math.floor(Date.now() / 1000) + 300 },
+           `getIdentityToken → ${user.name}`);
+        break;
       }
+      case 'getThemeTokens':
+        ok(themeMap(themeRef.current), `getThemeTokens → ${themeRef.current}`);
+        break;
+      case 'toast': {
+        const p = (data.params ?? {}) as { message?: string };
+        pushLog('in', `toast — "${String(p.message ?? '')}"`);
+        ok(undefined, 'toast ack');
+        break;
+      }
+      case 'resize': {
+        const p = (data.params ?? {}) as { height?: number };
+        const h = Math.max(400, Math.round(Number(p.height) || 0));
+        setIframeHeight(h);
+        pushLog('in', `resize — ${h}px`);
+        ok({ height: h }, `resize ack ${h}px`);
+        break;
+      }
+      default:
+        pushLog('in', `${method} (unhandled)`);
+        send(
+          { eos: BRIDGE_PROTOCOL, kind: 'response', id, ok: false,
+            error: { code: 'UNKNOWN_METHOD', message: `Harness does not implement ${method}.` } },
+          `${method} → UNKNOWN_METHOD`,
+        );
+    }
+  }, [pushLog, send, themeMap]);
+
+  // Open the channel once the iframe document has loaded. The port is TRANSFERRED, so it can only
+  // be handed over once — the app buffers the init at HTML-parse time for exactly this reason.
+  const openChannel = useCallback(() => {
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+    const channel = new MessageChannel();
+    portRef.current = channel.port1;
+    channel.port1.onmessage = onPortMessage;
+    channel.port1.start();
+    const nonce = Math.random().toString(36).slice(2);
+    win.postMessage(
+      { eos: BRIDGE_PROTOCOL, kind: 'handshake/init', protocolVersion: 1, nonce },
+      window.location.origin,
+      [channel.port2],
+    );
+    pushLog('out', 'handshake/init — port transferred');
+  }, [onPortMessage, pushLog]);
+
+  // Open the channel on mount as well as on load.
+  //
+  // A same-origin iframe frequently finishes loading BEFORE React attaches its onLoad handler, so
+  // relying on that event alone means the handshake is simply never sent — which is precisely how
+  // this harness sat at "Waiting for the app to connect…". Guarded so the two paths cannot open two
+  // channels: the port is transferred, and a second init would strand the first.
+  const openedRef = useRef(false);
+  const openOnce = useCallback(() => {
+    if (openedRef.current) return;
+    const doc = iframeRef.current?.contentDocument;
+    if (!iframeRef.current?.contentWindow) return;
+    // readyState 'complete' means we already missed onLoad; otherwise onLoad will fire and win.
+    if (doc && doc.readyState !== 'complete') return;
+    openedRef.current = true;
+    openChannel();
+  }, [openChannel]);
+
+  useEffect(() => {
+    openedRef.current = false;
+    const t = setTimeout(openOnce, 0);
+    const t2 = setTimeout(openOnce, 300);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(t2);
     };
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, [pushLog, reply, themeMap]);
+  }, [openOnce, iframeNonce]);
 
   // Push a theme update to the running app when the host theme toggles (live re-theme).
   const applyTheme = (t: 'light' | 'dark') => {
     setTheme(t);
     themeRef.current = t;
-    const win = iframeRef.current?.contentWindow;
-    if (win) {
-      win.postMessage({ type: `${PREFIX}theme`, ...themeMap(t) }, window.location.origin);
-      pushLog('out', `theme push → ${t}`);
-    }
+    send(
+      { eos: BRIDGE_PROTOCOL, kind: 'event', event: 'theme.changed', payload: themeMap(t) },
+      `theme.changed → ${t}`,
+    );
   };
 
   const switchUser = (key: string) => {
@@ -252,6 +316,9 @@ export default function HarnessPage() {
               className="hx-frame"
               src="/"
               title="Dive Schedule (embedded)"
+              // The real host opens the channel from the iframe's load event; matching that timing
+              // is what makes the app's HTML-parse-time handshake buffer meaningful here too.
+              onLoad={() => { if (!openedRef.current) { openedRef.current = true; openChannel(); } }}
               style={{ height: iframeHeight }}
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
             />

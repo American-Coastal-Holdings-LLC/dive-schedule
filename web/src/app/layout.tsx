@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
+import { BRIDGE_PROTOCOL } from '@eos/plugin-bridge';
 import { BRAND } from '@/lib/brand';
 import './globals.css';
 
@@ -67,10 +68,63 @@ export const viewport: Viewport = {
   themeColor: BRAND.color,
 };
 
+// The host sends its one-shot MessagePort in a `handshake/init` fired from the iframe's load event,
+// which can land BEFORE Next hydrates the client components. The port is transferred, not copied —
+// miss it and the bridge is dead for the life of the page, with no retry that can recover it.
+//
+// So this buffer has to exist from HTML-parse time: a plain inline <script>, NOT next/script
+// beforeInteractive (inline beforeInteractive is unsupported and runs at bundle-eval, which is
+// exactly the moment we are trying to get ahead of).
+//
+// It enforces the same origin gate as the real client, and buffers EVERY matching init rather than
+// keeping the last — a hostile sibling frame can post fakes, but it cannot evict the genuine one.
+// No token or post-handshake message ever passes through here; replay re-enters the official
+// client's own exact-origin validation.
+const ALLOWED_HOST_ORIGINS = [process.env.NEXT_PUBLIC_PLATFORM_ORIGIN]
+  .map((entry) => (entry ?? '').trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
+const BRIDGE_HANDSHAKE_BUFFER = `
+(() => {
+  var allowed = ${JSON.stringify(ALLOWED_HOST_ORIGINS)};
+  var listener = function (event) {
+    if (allowed.length ? allowed.indexOf(event.origin) === -1 : event.origin !== window.location.origin) return;
+    var data = event.data;
+    if (
+      data &&
+      data.eos === ${JSON.stringify(BRIDGE_PROTOCOL)} &&
+      data.kind === 'handshake/init' &&
+      event.ports &&
+      event.ports[0]
+    ) {
+      (window.__eosPendingBridgeHandshakes = window.__eosPendingBridgeHandshakes || []).push({
+        data: data,
+        origin: event.origin,
+        source: event.source,
+        port: event.ports[0],
+      });
+    }
+  };
+  window.addEventListener('message', listener);
+  window.__eosBridgeBufferTeardown = function () {
+    window.removeEventListener('message', listener);
+    delete window.__eosPendingBridgeHandshakes;
+    delete window.__eosBridgeBufferTeardown;
+  };
+})();
+`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={inter.variable} data-build-sha={BUILD_SHA}>
-      <body>{children}</body>
+      <body>
+        <script
+          id="eos-bridge-handshake-buffer"
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: BRIDGE_HANDSHAKE_BUFFER }}
+        />
+        {children}
+      </body>
     </html>
   );
 }

@@ -36,10 +36,16 @@ WORKDIR /app
 ARG BUILD_SHA
 ARG NEXT_PUBLIC_APP_ORIGIN
 ARG NEXT_PUBLIC_EOS_HOST_ORIGIN
+# The EOS workspace origin. lib/platform/bridge.ts pins postMessage's targetOrigin to this so the
+# identity token is never broadcast to an unexpected parent frame. Unset, the bridge falls back to
+# our OWN origin, every postMessage to the host is refused by the browser as an origin mismatch, and
+# the handshake times out — the embed renders "Could not reach the platform" with no other clue.
+ARG NEXT_PUBLIC_PLATFORM_ORIGIN
 ARG FRAME_ANCESTORS
 ENV BUILD_SHA=${BUILD_SHA}
 ENV NEXT_PUBLIC_APP_ORIGIN=${NEXT_PUBLIC_APP_ORIGIN}
 ENV NEXT_PUBLIC_EOS_HOST_ORIGIN=${NEXT_PUBLIC_EOS_HOST_ORIGIN}
+ENV NEXT_PUBLIC_PLATFORM_ORIGIN=${NEXT_PUBLIC_PLATFORM_ORIGIN}
 ENV FRAME_ANCESTORS=${FRAME_ANCESTORS}
 
 COPY --from=deps /app/api/node_modules ./api/node_modules

@@ -11,7 +11,15 @@ const API_URL = process.env.API_URL ?? 'http://localhost:4310';
 // domain (space-separated) for real deployments.
 const FRAME_ANCESTORS = (process.env.FRAME_ANCESTORS ?? "'self'").trim();
 
+// Build identity, inlined at build time so the served HTML can answer "which build is live?".
+// deploy-vendor.sh passes --build-arg BUILD_SHA=<commit>; the Dockerfile promotes it to an ENV in
+// the build stage. This matters more here than it looks: deploy-vendor.sh silently dry-runs and
+// exits 0 without HOSTING_OPS_ALLOW_LIVE=1, so "the deploy printed success" is not evidence that
+// anything changed. One curl against the served HTML is.
+const BUILD_SHA = process.env.BUILD_SHA ?? process.env.NEXT_PUBLIC_BUILD_SHA ?? 'unknown';
+
 const nextConfig: NextConfig = {
+  env: { NEXT_PUBLIC_BUILD_SHA: BUILD_SHA },
   // Standalone output: a self-contained server.js plus a pruned node_modules, which is what the
   // Docker runtime stage copies. Without this the runtime image needs the whole dependency tree.
   output: 'standalone',

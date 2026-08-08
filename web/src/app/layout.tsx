@@ -43,6 +43,23 @@ export const metadata: Metadata = {
   description: BRAND.description,
 };
 
+// CACHE POSTURE — deliberate, and load-bearing for the embed. Do not remove without replacing.
+//
+// Next statically prerenders this shell by default (the build reports `/` as ○ Static), and a
+// prerendered document ships `cache-control: s-maxage=31536000` — a YEAR of shared-cache lifetime.
+// Combined with content-hashed chunks that are immutable-cached on purpose, any cache in the path
+// can serve an old document plus its matching old chunks: a fully working OLD app, indefinitely
+// after a deploy. Hard-refreshing the parent workspace page does NOT force an iframe's document to
+// revalidate, so an embedded tenant has no self-service way out of it.
+//
+// force-dynamic drops the prerender and gets no-store semantics on the DOCUMENT only. Hashed assets
+// under /_next/static keep their immutable caching, so this does not trade staleness for latency.
+export const dynamic = 'force-dynamic';
+
+// Rendered into the served HTML in a machine-readable place so verifying a deploy is one command:
+//   curl -s https://<host>/ | grep -o 'data-build-sha="[^"]*"'
+const BUILD_SHA = process.env.NEXT_PUBLIC_BUILD_SHA ?? 'unknown';
+
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
@@ -52,7 +69,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={inter.variable} data-build-sha={BUILD_SHA}>
       <body>{children}</body>
     </html>
   );

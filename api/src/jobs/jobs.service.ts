@@ -11,6 +11,7 @@ import { instantToCivil, nextDueDate } from '../domain/dates';
 import { isSafePhoto, safeUrl, serializeJob, serializeRecord } from '../domain/serialize';
 import { buildRecordData, syncableFields } from '../domain/record-builder';
 import { AnswersDto, CertifyDto, CompleteJobDto, CreateJobDto, UpdateJobDto } from './jobs.dto';
+import { chkKindOf, chkNormalizePercent } from '../checklist/inspection';
 
 function toArray<T = unknown>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -232,7 +233,18 @@ export class JobsService {
 
   async setAnswers(identity: Identity, id: string, dto: AnswersDto) {
     const job = await this.loadVisibleJob(identity, id);
-    const answers = (dto.answers || []).map((a) => ({ id: a.id ?? '', q: a.q ?? '', a: a.a ?? '' }));
+    // Normalise percent answers server-side. The UI renders a select, so it already sends "50%" —
+    // but the UI is not the only writer (an older client, a replayed request, or a direct API
+    // call all reach here), and this column is snapshotted verbatim into the immutable service
+    // record. A record reading "50", "50%" and "half" across three jobs is not comparable, and it
+    // cannot be fixed after the fact once the record is sent. Normalising at the boundary is the
+    // only place that holds for every writer.
+    const answers = (dto.answers || []).map((a) => {
+      const q = a.q ?? '';
+      const raw = a.a ?? '';
+      const isPercent = chkKindOf({ text: q }) === 'percent';
+      return { id: a.id ?? '', q, a: isPercent ? chkNormalizePercent(raw) : raw };
+    });
     const saved = await this.prisma.job.update({
       where: { id: job.id },
       data: { checkAnswers: answers },

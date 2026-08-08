@@ -14,6 +14,7 @@ import { dueStatus, formatDate, formatWhen, isSafePhoto, money, num, rotationLab
 import { fileToResizedDataUrl } from '@/lib/photo';
 import { Modal } from '../Modal';
 import { Icon } from '../Icon';
+import { JobChecklist } from '../JobChecklist';
 import { DataImg } from '../common';
 import { usePlatform } from '../PlatformProvider';
 import { usePermissions } from '../PermissionsProvider';
@@ -360,25 +361,13 @@ export function JobDetailModal({
       {questions.length ? (
         <div className="dl job-chk">
           <div className="k">Inspection checklist</div>
-          {questions.map((q) => (
-            <div className="chk-row" key={q.id}>
-              <div className="chk-q">{q.text}</div>
-              {canComplete ? (
-                <input
-                  className="chk-answer"
-                  value={answers[q.id] ?? ''}
-                  onChange={(e) => onAnswerChange(q.id, e.target.value)}
-                  onBlur={onAnswerBlur}
-                  placeholder="—"
-                  aria-label={q.text}
-                />
-              ) : (
-                <div className="chk-answer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {answers[q.id] || '—'}
-                </div>
-              )}
-            </div>
-          ))}
+          <JobChecklist
+            questions={questions}
+            answers={answers}
+            canComplete={canComplete}
+            onAnswerChange={onAnswerChange}
+            onAnswerBlur={onAnswerBlur}
+          />
 
           {canComplete ? (
             <label className={certified ? 'cert-row on' : 'cert-row'}>

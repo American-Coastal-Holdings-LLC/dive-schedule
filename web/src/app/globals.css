@@ -731,6 +731,34 @@ select {
 .cert-row.on span { color: var(--success); }
 .cert-row em { display: block; font-style: normal; font-weight: 500; font-size: 12px; margin-top: 2px; color: var(--success); }
 
+
+/* ---------- Inspection checklist: sections + typed answer controls ----------
+   The template ships section HEADERS as ordinary rows; organizeJobChecklistSections lifts them out
+   of the answerable set and renders them here instead, which is what stops a diver being shown
+   three questions that can never be answered. */
+.chk-section {
+  font-size: var(--fs-11); font-weight: var(--fw-bold);
+  text-transform: uppercase; letter-spacing: var(--lt-caps);
+  color: var(--text-mute);
+  margin: var(--sp-5) 0 var(--sp-2);
+  display: flex; align-items: center; gap: var(--sp-3);
+}
+.chk-section::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.job-chk > div:first-child .chk-section { margin-top: var(--sp-3); }
+
+/* A select answer sits in the same slot as the text input it replaced, so rows stay aligned. */
+select.chk-answer { padding-right: 30px; background-position: right 8px center; cursor: pointer; }
+
+/* Read-only answer (no dive.jobs.complete): same box, centred, non-interactive. */
+.chk-answer-ro { display: flex; align-items: center; justify-content: center; color: var(--text-soft); }
+
+/* Checkbox answers ("through holes clear?") — a full-width input would be absurd for a boolean. */
+.chk-check {
+  -webkit-appearance: checkbox; appearance: auto;
+  width: 22px; height: 22px; flex: none; margin: 0; padding: 0;
+  accent-color: var(--primary); cursor: pointer;
+}
+
 /* ---------- POS ---------- */
 .pos-lines { margin-bottom: 4px; }
 .pos-line {

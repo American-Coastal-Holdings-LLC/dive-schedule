@@ -1,4 +1,5 @@
 import { InventoryItem, Job, LedgerEntry, ServiceRecord } from '@prisma/client';
+import { invHasLowStock, invTypeOf } from '../inventory/inventory-domain';
 import { dueStatus } from './dates';
 
 // --- security/format helpers (ported verbatim from the seed) ---
@@ -118,14 +119,18 @@ export function serializeItem(item: InventoryItem): Record<string, unknown> {
   return {
     id: item.id,
     name: item.name,
-    type: item.type,
+    // Normalised on the way out so a row written before the type vocabulary settled still lands in
+    // one of the three filter chips instead of none of them.
+    type: invTypeOf(item.type),
     quantity: item.quantity,
     unitCost: num(item.unitCost),
     salePrice: num(item.salePrice),
     sku: item.sku,
     lowStockAt: item.lowStockAt,
     notes: item.notes,
-    lowStock: item.lowStockAt > 0 && item.quantity <= item.lowStockAt,
+    // Derived here rather than in the browser: the UI reads these flags, so there is exactly one
+    // definition of "low" and it is the server's.
+    lowStock: invHasLowStock(item),
     sellable: num(item.salePrice) > 0,
   };
 }

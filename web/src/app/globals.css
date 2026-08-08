@@ -668,15 +668,34 @@ select {
 }
 .inv-filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
+.inv-actions { display: flex; justify-content: flex-end; margin: 0 16px 10px; }
+.inv-actions .btn { flex: none; }
+
+/* The row is a container, not a control: it holds the edit button AND the ± steppers, and a button
+   cannot nest inside a button. The button reset moved down to .iv-main. */
 .inv-row {
   display: flex; align-items: center; gap: 12px; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius-md); padding: 13px 14px;
-  margin: 0 16px 8px; box-shadow: var(--shadow-sm); cursor: pointer;
+  margin: 0 16px 8px; box-shadow: var(--shadow-sm);
   transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
   width: calc(100% - 32px); text-align: left; font-family: inherit;
 }
 .inv-row:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
-.inv-row .iv-main { flex: 1; min-width: 0; }
+.inv-row .iv-main {
+  flex: 1; min-width: 0; background: none; border: 0; padding: 0; margin: 0;
+  font-family: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.inv-row .iv-main:disabled { cursor: default; }
+.inv-row .iv-step { display: flex; gap: 6px; flex: none; }
+.inv-row .iv-step button {
+  width: 30px; height: 30px; display: grid; place-items: center; flex: none;
+  font-size: 17px; font-weight: 600; font-family: inherit; line-height: 1;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  border-radius: 50%; cursor: pointer;
+  transition: background .16s var(--ease), border-color .16s var(--ease);
+}
+.inv-row .iv-step button:hover:not(:disabled) { background: var(--border-soft); border-color: var(--border-strong); }
+.inv-row .iv-step button:disabled { opacity: .4; cursor: default; }
 .inv-row .iv-name { font-size: 14.5px; font-weight: 600; color: var(--text); }
 .inv-row .iv-sub { font-size: 12.5px; color: var(--text-mute); margin-top: 2px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .inv-row .iv-qty { text-align: right; flex: none; }
@@ -691,6 +710,23 @@ select {
 .tag.part { background: var(--purple-soft); color: var(--purple-ink); }
 .tag.tool { background: var(--amber-soft); color: var(--amber-ink); }
 .tag.low { background: var(--danger-soft); color: var(--danger); }
+
+/* ---------- Stock import wizard ---------- */
+.import-help { font-size: 12.5px; color: var(--text-mute); line-height: 1.45; margin: 0 0 10px; }
+.import-help code {
+  font-size: 11.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface-2); padding: 1px 5px; border-radius: 3px; border: 1px solid var(--border);
+}
+.import-preview {
+  margin-top: 10px; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.import-preview table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.import-preview th, .import-preview td {
+  padding: 6px 8px; border-bottom: 1px solid var(--border-soft); text-align: left; white-space: nowrap;
+}
+.import-preview th { color: var(--text-mute); font-weight: 600; background: var(--surface-2); }
+.import-note { margin-top: 8px; font-size: 12px; color: var(--text-mute); }
+.import-errors { margin-top: 8px; font-size: 12px; color: var(--danger); line-height: 1.5; }
 
 /* ---------- Checklist (question + answer) ---------- */
 .chk-add { display: flex; gap: 8px; margin: 0 16px 16px; }

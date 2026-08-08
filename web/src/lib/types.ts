@@ -113,6 +113,23 @@ export interface InventoryItem {
   sku: string;
   lowStockAt: number;
   notes: string;
+  // Derived server-side (api/src/inventory/inventory-domain.ts) and shipped on the payload so the
+  // browser never holds a second definition of "low".
+  lowStock: boolean;
+  sellable: boolean;
+}
+
+// One validated row from a paste, as returned by /api/inventory/import/preview. Numeric already —
+// the server coerced it — so the preview table renders it without touching it.
+export interface InventoryImportRow {
+  name: string;
+  type: InventoryType;
+  quantity: number;
+  unitCost: number;
+  salePrice: number;
+  sku: string;
+  lowStockAt: number;
+  notes: string;
 }
 
 export interface LedgerEntry {

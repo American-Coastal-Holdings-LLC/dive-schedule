@@ -203,6 +203,9 @@ Errors: `401` bad/missing token, `403` missing permission, `404` not found *or n
 | GET `/api/pay?week=<offset>&userId=<id>` | pay.view-own \| view-all | userId ≠ self requires view-all; `{ weekStart, days:[...], weekTotal, totalFeet }` |
 | GET `/api/inventory` | inventory.view | |
 | POST `/api/inventory`, PATCH/DELETE `/api/inventory/:id` | inventory.manage | |
+| POST `/api/inventory/:id/adjust` | inventory.manage | `{ delta }` relative stock movement; never below zero, 422 `Only N in stock` on over-consume |
+| POST `/api/inventory/import/preview` | inventory.manage | `{ text }` CSV/TSV → `{ rows, errors, hasHeader }`; parses only, writes nothing |
+| POST `/api/inventory/import` | inventory.manage | `{ text }` re-parsed server-side → `{ created, errors }` |
 | GET `/api/finance/summary` | finance.view | week/month/year in/out/net + 6-month trend series |
 | GET `/api/ledger` | finance.view | |
 | POST `/api/ledger`, DELETE `/api/ledger/:id` | finance.manage | |

@@ -155,6 +155,11 @@
   --sp-6: 24px;
   --sp-7: 32px;
 
+  /* ── gutter: the page's horizontal breathing room, and the one number the whole layout
+       measures from. Responsive because 16px of each edge on a 320px phone spends 10% of the
+       screen on nothing; the clamp gives it back without touching a single component. ── */
+  --gutter: clamp(12px, 4vw, 16px);
+
   /* ── radius ── */
   --radius: 16px;
   --radius-md: 12px;
@@ -278,6 +283,24 @@
   }
 }
 
+/* ── WHEN THE HOST HAS SPOKEN, ITS PALETTE WINS WHOLE — not four-sevenths of it. ──
+   EOS sends four inputs: background, foreground, border, primary. The other contract inputs
+   (--surface above all) are ours, and until now they came from the prefers-color-scheme block —
+   so a host sending a LIGHT theme to a browser in OS dark mode got #ffffff pages with #121d31
+   cards and #111111 text on them. Unreadable, and the NORMAL case rather than an edge one, since
+   a four-token payload is what the platform actually sends.
+
+   Deriving them from the tokens the host DID send makes a partial payload complete. This is safe
+   against a host that sends more: the bridge applies its theme as INLINE styles on :root, and an
+   inline style outranks every rule here — so anything the host does send still wins.
+
+   --surface is mixed toward white in both directions on purpose: an elevated plane reads lighter
+   than its page in a light theme AND in a dark one. Mixing "away from --text" would invert in dark. */
+:root[data-eos-mode] {
+  --surface: color-mix(in srgb, var(--bg) 94%, #ffffff);
+  --muted: color-mix(in srgb, var(--text) 52%, var(--bg));
+}
+
 /* The host can be dark while the OS is light (and vice versa). When EOS tells us its mode, that
    wins over the media query — same six inputs, same free derivation.
    color-scheme is set explicitly in BOTH directions: it drives the native bits we do not paint
@@ -342,8 +365,8 @@ svg { display: block; }
    ------------------------------------------------------------------------------------------ */
 header {
   position: sticky; top: 0; z-index: var(--z-header);
-  display: flex; align-items: center; gap: var(--sp-3);
-  padding: calc(var(--sp-35) + env(safe-area-inset-top)) var(--sp-45) var(--sp-35);
+  display: flex; align-items: center; gap: var(--sp-25);
+  padding: calc(var(--sp-3) + env(safe-area-inset-top)) var(--gutter) var(--sp-3);
   background:
     radial-gradient(120% 140% at 18% -40%, rgba(255, 255, 255, .13), transparent 58%),
     linear-gradient(180deg, var(--brand), var(--brand-700));
@@ -390,41 +413,91 @@ header .subtitle {
   color: rgba(255, 255, 255, .5);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* The identity chip SHRINKS. It used to be flex:none while holding whatever the directory
+   returned — and with PII nulled that is a 25-character user id, which pushed the product name
+   down to "Dive …" on a phone. Now it yields first: the brand is what must survive. */
 header .who {
-  flex: none;
+  flex: 0 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis;
   font-size: var(--fs-11); font-weight: var(--fw-semibold);
   padding: 5px var(--sp-25); border-radius: var(--radius-pill);
   white-space: nowrap; display: inline-flex; align-items: center; gap: var(--sp-15);
   background: rgba(255, 255, 255, .09); color: rgba(255, 255, 255, .84);
   border: 1px solid rgba(255, 255, 255, .14);
 }
-header .who .icn { width: 13px; height: 13px; opacity: .8; }
+header .who .icn { width: 13px; height: 13px; opacity: .8; flex: none; }
+
+/* Below ~380px the chip is costing more than it tells you — the avatar in the host chrome
+   already says who is signed in, so drop to the icon alone rather than a truncated id. */
+@media (max-width: 380px) {
+  header .who { font-size: 0; gap: 0; padding: 6px; }
+  header .who .icn { width: 15px; height: 15px; }
+}
 
 /* ---------- Layout ---------- */
-main { max-width: 600px; margin: 0 auto; padding: 18px 0 0; }
+/* The column. 600px is the reading measure on a large screen; below that it is simply the
+   viewport, and every child measures its own inset from --gutter rather than a hardcoded 16px. */
+main { max-width: 600px; margin: 0 auto; padding: var(--sp-45) 0 0; }
 
-/* ---------- Segmented tabs ---------- */
+/* Nothing may exceed the viewport. A single overflowing child on a phone scrolls the whole page
+   sideways and makes every screen feel broken, so this is a floor, not a nicety. */
+html, body { max-width: 100%; overflow-x: hidden; }
+img, svg, video, canvas { max-width: 100%; }
+
+/* ---------- Tab strip ----------
+   Seven destinations on a phone is more than fits, so this is a SCROLLING strip, not a segmented
+   control pretending to be one. The previous rule said `flex: 1 0 auto` — grow, but never shrink —
+   so the tabs could not compress, the strip overflowed with no affordance, and the
+   `text-overflow: ellipsis` beside it was dead code on a button that could never be narrowed.
+
+   What makes a scrolling strip usable rather than a trap: it must LOOK scrollable (the edge fades),
+   it must land cleanly (scroll-snap), the active tab must bring itself into view (Shell.tsx), and
+   the targets must be thumb-sized (44px, the platform minimum).
+   ------------------------------------------------------------------------------------------ */
 .tabs {
-  display: flex; gap: 4px; margin: 0 16px 18px; padding: 4px;
-  background: var(--surface-sunken); border: 1px solid var(--border); border-radius: 12px;
+  display: flex; gap: var(--sp-1);
+  margin: 0 var(--gutter) var(--sp-45);
+  padding: var(--sp-1);
+  background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius-md);
   overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scroll-padding: var(--sp-1);
+  /* Fade both edges so a cut-off tab reads as "there is more", not as a rendering fault. The mask
+     is transparent-in at both ends; a strip that fits shows no fade because nothing is clipped. */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
 }
 .tabs::-webkit-scrollbar { display: none; }
+
 .tab-btn {
-  flex: 1 0 auto; padding: 9px 12px; font-size: 12.5px; font-weight: 600; font-family: inherit;
+  /* shrink-to-fit, but never below a readable label or a thumb-sized target */
+  flex: 0 1 auto; min-width: max-content;
+  min-height: 44px; padding: 0 var(--sp-3);
+  font-size: var(--fs-13); font-weight: var(--fw-semibold); font-family: inherit;
   border: none; cursor: pointer; background: transparent; color: var(--text-soft);
-  border-radius: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  transition: color .18s var(--ease), background .18s var(--ease), box-shadow .18s var(--ease);
+  border-radius: var(--radius-sm); white-space: nowrap;
+  scroll-snap-align: center;
+  transition: color var(--dur-base) var(--ease), background var(--dur-base) var(--ease),
+    box-shadow var(--dur-base) var(--ease);
 }
 .tab-btn:hover { color: var(--text); }
-.tab-btn.active { background: var(--surface); color: var(--primary); box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--border); }
+.tab-btn.active {
+  background: var(--surface); color: var(--primary);
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--border);
+}
+
+/* Wide enough for every tab at once: stop scrolling, share the space evenly, drop the fades. */
+@media (min-width: 620px) {
+  .tabs { overflow-x: visible; -webkit-mask-image: none; mask-image: none; }
+  .tab-btn { flex: 1 1 0; min-width: 0; }
+}
 
 /* ---------- Banner ---------- */
 .banner {
   display: flex; gap: 10px; align-items: flex-start;
   background: var(--amber-soft); border: 1px solid var(--amber-line); color: var(--amber-ink);
   border-radius: var(--radius-md); padding: 12px 14px; font-size: 13px; line-height: 1.5;
-  margin: 0 16px 16px;
+  margin: 0 var(--gutter) var(--sp-4);
 }
 .banner .icn { color: var(--amber-icon); margin-top: 1px; }
 .banner b { color: var(--amber-ink); font-weight: 700; }
@@ -436,13 +509,13 @@ main { max-width: 600px; margin: 0 auto; padding: 18px 0 0; }
 .day-header {
   display: flex; align-items: center; gap: 12px;
   font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px;
-  color: var(--text-mute); margin: 22px 20px 10px;
+  color: var(--text-mute); margin: var(--sp-6) calc(var(--gutter) + var(--sp-1)) var(--sp-25);
 }
 .day-header::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
 /* ---------- Segmented sub-filter (Jobs: Unfinished|Finished, Records: Active|Sent) ---------- */
 .seg {
-  display: flex; gap: 4px; margin: 0 16px 16px; padding: 4px;
+  display: flex; gap: 4px; margin: 0 var(--gutter) var(--sp-4); padding: 4px;
   background: var(--surface-sunken); border: 1px solid var(--border); border-radius: 12px;
 }
 .seg-btn {
@@ -461,9 +534,9 @@ main { max-width: 600px; margin: 0 auto; padding: 18px 0 0; }
 /* ---------- Job card ---------- */
 .card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 15px 16px; margin: 0 16px 10px; box-shadow: var(--shadow-sm); cursor: pointer;
+  padding: 15px 16px; margin: 0 var(--gutter) var(--sp-25); box-shadow: var(--shadow-sm); cursor: pointer;
   transition: border-color .18s var(--ease), box-shadow .18s var(--ease), transform .16s var(--ease);
-  width: calc(100% - 32px);
+  width: calc(100% - (var(--gutter) * 2));
   text-align: left; font-family: inherit; color: inherit; display: block;
 }
 .card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); transform: translateY(-2px); }
@@ -593,7 +666,7 @@ select {
 .add-btn { width: 100%; margin-bottom: 18px; }
 
 /* ---------- Sales portal ---------- */
-.sales-section { margin: 0 16px 20px; }
+.sales-section { margin: 0 var(--gutter) var(--sp-5); }
 .sales-h {
   font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px;
   color: var(--text-mute); margin: 20px 4px 10px;
@@ -632,7 +705,7 @@ select {
 .ledger-row {
   display: flex; align-items: center; gap: 12px; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px;
-  margin: 0 16px 8px; box-shadow: var(--shadow-sm);
+  margin: 0 var(--gutter) var(--sp-2); box-shadow: var(--shadow-sm);
 }
 .ledger-row .lr-ico {
   width: 34px; height: 34px; border-radius: 9px; flex: none; display: flex;
@@ -657,7 +730,7 @@ select {
 
 /* ---------- Inventory ---------- */
 .inv-filter {
-  display: flex; gap: 6px; margin: 0 16px 14px; overflow-x: auto; padding-bottom: 2px;
+  display: flex; gap: 6px; margin: 0 var(--gutter) var(--sp-35); overflow-x: auto; padding-bottom: 2px;
   -webkit-overflow-scrolling: touch;
 }
 .inv-filter-btn {
@@ -668,7 +741,7 @@ select {
 }
 .inv-filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
-.inv-actions { display: flex; justify-content: flex-end; margin: 0 16px 10px; }
+.inv-actions { display: flex; justify-content: flex-end; margin: 0 var(--gutter) var(--sp-25); }
 .inv-actions .btn { flex: none; }
 
 /* The row is a container, not a control: it holds the edit button AND the ± steppers, and a button
@@ -676,9 +749,9 @@ select {
 .inv-row {
   display: flex; align-items: center; gap: 12px; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius-md); padding: 13px 14px;
-  margin: 0 16px 8px; box-shadow: var(--shadow-sm);
+  margin: 0 var(--gutter) var(--sp-2); box-shadow: var(--shadow-sm);
   transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
-  width: calc(100% - 32px); text-align: left; font-family: inherit;
+  width: calc(100% - (var(--gutter) * 2)); text-align: left; font-family: inherit;
 }
 .inv-row:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
 .inv-row .iv-main {
@@ -729,12 +802,12 @@ select {
 .import-errors { margin-top: 8px; font-size: 12px; color: var(--danger); line-height: 1.5; }
 
 /* ---------- Checklist (question + answer) ---------- */
-.chk-add { display: flex; gap: 8px; margin: 0 16px 16px; }
+.chk-add { display: flex; gap: 8px; margin: 0 var(--gutter) var(--sp-4); }
 .chk-add input { flex: 1; min-width: 0; margin: 0; }
 .chk-row {
   display: flex; align-items: center; gap: 10px; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius-md); padding: 11px 12px 11px 14px;
-  margin: 0 16px 8px; box-shadow: var(--shadow-sm);
+  margin: 0 var(--gutter) var(--sp-2); box-shadow: var(--shadow-sm);
 }
 .chk-q { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; color: var(--text); line-height: 1.35; }
 .chk-answer {
@@ -853,9 +926,9 @@ select.chk-answer { padding-right: 30px; background-position: right 8px center; 
 .rec-row {
   display: flex; align-items: center; gap: 12px; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius-md); padding: 13px 14px;
-  margin: 0 16px 8px; box-shadow: var(--shadow-sm); cursor: pointer;
+  margin: 0 var(--gutter) var(--sp-2); box-shadow: var(--shadow-sm); cursor: pointer;
   transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
-  width: calc(100% - 32px); text-align: left; font-family: inherit;
+  width: calc(100% - (var(--gutter) * 2)); text-align: left; font-family: inherit;
 }
 .rec-row:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
 .rec-main { flex: 1; min-width: 0; }
@@ -903,9 +976,9 @@ select.chk-answer { padding-right: 30px; background-position: right 8px center; 
 .calc-line.sub span { font-size: 12.5px; color: var(--text-mute); }
 
 /* ---------- Pay ---------- */
-.pay-select { margin: 0 16px 16px; }
+.pay-select { margin: 0 var(--gutter) var(--sp-4); }
 .pay-select select { margin: 0; }
-.pay-weeknav { display: flex; align-items: center; gap: 10px; margin: 0 16px 14px; }
+.pay-weeknav { display: flex; align-items: center; gap: 10px; margin: 0 var(--gutter) var(--sp-35); }
 .pay-nav {
   width: 40px; height: 40px; flex: none; border-radius: 10px; border: 1px solid var(--border);
   background: var(--surface); color: var(--text); font-size: 20px; cursor: pointer; line-height: 1;
@@ -918,7 +991,7 @@ select.chk-answer { padding-right: 30px; background-position: right 8px center; 
 .pay-total-card {
   background: linear-gradient(150deg, var(--brand) 0%, var(--primary-strong) 100%);
   color: #fff; border-radius: var(--radius); padding: 22px 18px;
-  margin: 0 16px 8px; text-align: center; box-shadow: var(--shadow-lg);
+  margin: 0 var(--gutter) var(--sp-2); text-align: center; box-shadow: var(--shadow-lg);
   position: relative; overflow: hidden;
 }
 .pay-total-card::before {
@@ -929,7 +1002,7 @@ select.chk-answer { padding-right: 30px; background-position: right 8px center; 
 .ptc-lbl { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: rgba(255,255,255,.7); }
 .ptc-val { font-size: 34px; font-weight: 700; letter-spacing: -.5px; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
 .ptc-sub { font-size: 12.5px; color: rgba(255,255,255,.7); font-variant-numeric: tabular-nums; }
-.pay-day { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); margin: 0 16px 8px; box-shadow: var(--shadow-sm); overflow: hidden; }
+.pay-day { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); margin: 0 var(--gutter) var(--sp-2); box-shadow: var(--shadow-sm); overflow: hidden; }
 .pay-day-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; }
 .pay-day.has .pay-day-head { background: var(--surface-2); }
 .pay-dow { font-size: 13.5px; font-weight: 700; color: var(--text); }
@@ -952,7 +1025,7 @@ select.chk-answer { padding-right: 30px; background-position: right 8px center; 
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* ---------- Divers (roster list) ---------- */
-.diver-grid { display: flex; flex-direction: column; gap: 8px; margin: 0 16px; }
+.diver-grid { display: flex; flex-direction: column; gap: 8px; margin: 0 var(--gutter); }
 .diver-card {
   display: flex; align-items: center; gap: 13px; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px;

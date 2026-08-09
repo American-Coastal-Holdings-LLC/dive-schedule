@@ -3,7 +3,7 @@
 // App shell: brand header, permission-filtered tab bar, and the active tab. Tab visibility is
 // derived purely from dive.* permissions (docs/ARCHITECTURE.md §Frontend). No role names anywhere.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePermissions } from './PermissionsProvider';
 import { Icon } from './Icon';
 import { PERMISSIONS as P } from '@/lib/permissions';
@@ -41,6 +41,16 @@ export function Shell() {
   const current = visibleTabs.find((t) => t.key === active) ?? visibleTabs[0];
   const Active = current?.Comp;
 
+  // Bring the active tab into view. The strip scrolls on a phone, so on first paint — or after a
+  // permission set that puts the landing tab off-screen — the user would otherwise see a strip that
+  // looks like it starts at "Jobs" with no sign their current tab is three swipes right.
+  const stripRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = stripRef.current?.querySelector<HTMLElement>('.tab-btn.active');
+    // `nearest` so a strip that already fits never scrolls, and the page itself never jumps.
+    el?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+  }, [current?.key]);
+
   return (
     <>
       <header>
@@ -63,7 +73,7 @@ export function Shell() {
         // A real tablist: roving tabindex + arrow keys, so the bar is operable from the keyboard
         // and announces itself. Previously every tab was a tab stop with no arrow handling, which
         // is the one interaction a screen-reader user has to get through to reach any screen.
-        <div className="tabs" role="tablist" aria-label={`${BRAND.name} sections`}>
+        <div className="tabs" ref={stripRef} role="tablist" aria-label={`${BRAND.name} sections`}>
           {visibleTabs.map((t) => {
             const selected = t.key === current?.key;
             return (

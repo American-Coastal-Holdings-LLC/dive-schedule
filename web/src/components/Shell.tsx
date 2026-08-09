@@ -38,6 +38,11 @@ export function Shell() {
   const visibleTabs = useMemo(() => TABS.filter((t) => t.visible({ can, hasAny })), [can, hasAny]);
   const [active, setActive] = useState<string>(() => visibleTabs[0]?.key ?? 'jobs');
 
+  // A directory that returned PII-nulled fields gives us the user id back as the "name". Detect
+  // that rather than render it: ids here are cuid/ulid-shaped and contain no space.
+  const hasRealName =
+    !!me.user.name && me.user.name !== me.user.id && !/^[a-z0-9]{20,}$/i.test(me.user.name);
+
   const current = visibleTabs.find((t) => t.key === active) ?? visibleTabs[0];
   const Active = current?.Comp;
 
@@ -63,10 +68,18 @@ export function Shell() {
           <h1>{BRAND.name}</h1>
           <div className="subtitle">{BRAND.tagline}</div>
         </div>
-        <div className="who">
-          <Icon name="user" />
-          {me.user.name}
-        </div>
+        {/* Only when we actually have a NAME.
+            users.read returns PII nulled without the sensitive tier (requesting that tier trips the
+            §9 pen-test gate), so the directory hands back the user id — and a 25-character cuid is
+            not an identity, it is noise wearing one. The host chrome already shows who is signed in
+            immediately above this, so an absent chip loses nothing and buys back the scarcest space
+            on a phone. If the tier is ever granted, real names appear here with no code change. */}
+        {hasRealName ? (
+          <div className="who">
+            <Icon name="user" />
+            {me.user.name}
+          </div>
+        ) : null}
       </header>
 
       {visibleTabs.length > 1 ? (

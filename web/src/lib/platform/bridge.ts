@@ -202,19 +202,66 @@ function replayBufferedHandshakes(): void {
 // ---------------------------------------------------------------------------
 let clientPromise: Promise<BridgeClient> | undefined;
 
+/**
+ * Wait briefly for the host's handshake/init to land in the parse-time buffer, so the origin we pin
+ * is the one the host actually spoke from.
+ *
+ * WHY WAIT INSTEAD OF GUESSING: with two doors, picking wrong means the client rejects the host's
+ * init on its own origin check and the handshake times out with nothing logged on our side — which
+ * is precisely the failure this app shipped. document.referrer is only a HINT: it depends on the
+ * host's referrer-policy, and a policy change elsewhere would silently reintroduce the bug. The
+ * init itself is fact and needs no cooperation.
+ *
+ * Bounded, because an unframed run has no host and must fall through to stub mode promptly.
+ */
+async function resolveHostOrigin(): Promise<string> {
+  const allowed = allowedHostOrigins();
+  if (typeof window === 'undefined') return allowed[0] ?? '';
+
+  const fromBuffer = (): string | undefined =>
+    (window.__eosPendingBridgeHandshakes ?? []).map((p) => p.origin).find((o) => allowed.includes(o));
+
+  const hit = fromBuffer();
+  if (hit) return hit;
+
+  // The host posts from the iframe's load event, which can land after this module evaluates. Poll
+  // the buffer rather than racing it; the parse-time script is still armed and keeps every init.
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 50));
+    const late = fromBuffer();
+    if (late) return late;
+  }
+
+  // No init arrived. Fall back to the referrer hint, then the first configured origin — both of
+  // which fail closed at the client's own origin check rather than trusting an unknown framer.
+  try {
+    if (document.referrer) {
+      const ref = new URL(document.referrer).origin;
+      if (allowed.includes(ref)) return ref;
+    }
+  } catch {
+    /* a malformed referrer is not worth failing over */
+  }
+  return allowed[0] ?? window.location.origin;
+}
+
 function client(): Promise<BridgeClient> {
-  if (!clientPromise) {
-    const framed = isFramed();
+  if (clientPromise) return clientPromise;
+
+  const framed = isFramed();
+
+  const started: Promise<BridgeClient> = (async () => {
+    // Framed: pin to the door the host actually spoke from. Unframed: stub mode needs no real
+    // origin, and resolveHostOrigin would spend its whole timeout waiting for an init nobody sends.
+    const host = framed ? await resolveHostOrigin() : (allowedHostOrigins()[0] ?? '');
+
     const c = new BridgeClient({
       mode: framed ? 'real' : 'stub',
-      hostOrigin: hostOrigin(),
+      hostOrigin: host,
       // Stub fixtures mirror the dev users the API's dev-stub provider accepts, so an unframed run
       // is a working app rather than an empty shell.
-      stub: framed
-        ? undefined
-        : {
-            identityToken: buildDevToken(findDevUser(DEFAULT_DEV_USER_KEY)),
-          },
+      stub: framed ? undefined : { identityToken: buildDevToken(findDevUser(DEFAULT_DEV_USER_KEY)) },
     });
 
     // connect() attaches its window listener SYNCHRONOUSLY, then waits. So start it, replay the
@@ -223,29 +270,31 @@ function client(): Promise<BridgeClient> {
     // be sent again.
     const connected = c.connect();
     replayBufferedHandshakes();
+    await connected;
 
-    clientPromise = connected.then(() => {
-      // A pushed theme re-themes the app live (a host toggling dark mode mid-session).
-      c.on('theme.changed', (tokens) => {
-        const vars = themeToCss(tokens as HostTheme);
-        themeListeners.forEach((cb) => {
-          try {
-            cb(vars);
-          } catch {
-            /* one bad listener must not break the bridge */
-          }
-        });
+    // A pushed theme re-themes the app live (a host toggling dark mode mid-session).
+    c.on('theme.changed', (tokens) => {
+      const vars = themeToCss(tokens as HostTheme);
+      themeListeners.forEach((cb) => {
+        try {
+          cb(vars);
+        } catch {
+          /* one bad listener must not break the bridge */
+        }
       });
-      return c;
     });
 
-    // A failed connect must not be cached as a permanently rejected promise — the host may simply
-    // have been slow. Clear it so the next call retries.
-    clientPromise.catch(() => {
-      clientPromise = undefined;
-    });
-  }
-  return clientPromise;
+    return c;
+  })();
+
+  // A failed connect must not be cached as a permanently rejected promise — the host may simply
+  // have been slow. Clear it so the next call retries, but only if nothing newer replaced it.
+  started.catch(() => {
+    if (clientPromise === started) clientPromise = undefined;
+  });
+
+  clientPromise = started;
+  return started;
 }
 
 const bridge: PlatformBridge = {

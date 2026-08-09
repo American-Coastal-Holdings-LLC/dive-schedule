@@ -35,19 +35,55 @@ type ThemeListener = (vars: Record<string, string>) => void;
 const themeListeners = new Set<ThemeListener>();
 
 /**
- * The EOS workspace origin. Outbound messages pin `targetOrigin` to it and inbound messages are
- * validated against it, so the identity token can never be posted to, or accepted from, an
- * unexpected frame.
+ * The EOS host origins that may embed this app, as a space-separated allowlist.
  *
- * MUST be a build arg (NEXT_PUBLIC_* is inlined at build time). Set only at runtime it silently
- * ships the default, the client pins to our own origin, and every message to the host is refused by
- * the browser as an origin mismatch — see the Dockerfile note.
+ * A LIST, not a value, because a plugin has more than one door: the platform workspace
+ * (workspace.<pilot>.sslip.io) and its own branded door (diveschedule.<pilot>.sslip.io) are different
+ * ORIGINS serving the same shell. Pinning one broke the other — the browser refused every postMessage
+ * as an origin mismatch and the host reported "couldn't finish connecting", naming nothing useful.
+ *
+ * MUST be a build arg: NEXT_PUBLIC_* is inlined at build time, so a runtime value silently ships the
+ * default. Keep it in step with CSP_FRAME_ANCESTORS on the API — same origins, two places, and a
+ * disagreement blocks the frame outright rather than degrading.
+ */
+function allowedHostOrigins(): string[] {
+  return (process.env.NEXT_PUBLIC_PLATFORM_ORIGIN || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((o) => o.replace(/\/$/, ''));
+}
+
+/**
+ * Which of the allowed origins is actually hosting us right now.
+ *
+ * Resolved rather than configured, because the client needs ONE targetOrigin and only the embedder
+ * knows which door the user came through. Two sources, in order of trustworthiness:
+ *   1. A buffered handshake's own event.origin — the host has already spoken, so this is fact.
+ *   2. document.referrer — the embedding page, available before the host says anything.
+ * Both are validated against the allowlist, so a hostile framer cannot nominate itself; an
+ * unrecognised embedder falls back to the first configured origin, which then fails closed at the
+ * client's own origin check rather than silently trusting whoever framed us.
  */
 function hostOrigin(): string {
-  const configured = (process.env.NEXT_PUBLIC_PLATFORM_ORIGIN || '').trim();
-  if (configured) return configured.replace(/\/$/, '');
-  if (typeof window !== 'undefined') return window.location.origin;
-  return '';
+  const allowed = allowedHostOrigins();
+  if (typeof window === 'undefined') return allowed[0] ?? '';
+
+  const buffered = window.__eosPendingBridgeHandshakes ?? [];
+  for (const pending of buffered) {
+    if (allowed.includes(pending.origin)) return pending.origin;
+  }
+
+  try {
+    if (document.referrer) {
+      const ref = new URL(document.referrer).origin;
+      if (allowed.includes(ref)) return ref;
+    }
+  } catch {
+    /* a malformed referrer is not worth failing over */
+  }
+
+  return allowed[0] ?? window.location.origin;
 }
 
 /** True when running inside a host frame. Decides real vs stub. */

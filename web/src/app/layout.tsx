@@ -80,9 +80,14 @@ export const viewport: Viewport = {
 // keeping the last — a hostile sibling frame can post fakes, but it cannot evict the genuine one.
 // No token or post-handshake message ever passes through here; replay re-enters the official
 // client's own exact-origin validation.
-const ALLOWED_HOST_ORIGINS = [process.env.NEXT_PUBLIC_PLATFORM_ORIGIN]
-  .map((entry) => (entry ?? '').trim().replace(/\/$/, ''))
-  .filter(Boolean);
+// Space-separated, because a plugin has more than one door: the platform workspace and its own
+// branded door are different ORIGINS serving the same shell. This list must match the allowlist in
+// lib/platform/bridge.ts and CSP_FRAME_ANCESTORS on the API — three places, same origins.
+const ALLOWED_HOST_ORIGINS = (process.env.NEXT_PUBLIC_PLATFORM_ORIGIN ?? '')
+  .trim()
+  .split(/\s+/)
+  .filter(Boolean)
+  .map((entry) => entry.replace(/\/$/, ''));
 
 const BRIDGE_HANDSHAKE_BUFFER = `
 (() => {

@@ -54,7 +54,7 @@ const USERS = {
     name: 'Riley Chen',
     tenantId: 'tenant_demo',
     installationId: 'inst_demo',
-    permissions: [P.JOBS_VIEW_ASSIGNED, P.JOBS_COMPLETE, P.PAY_VIEW_OWN, P.INVENTORY_VIEW],
+    permissions: [P.JOBS_VIEW_ASSIGNED, P.JOBS_COMPLETE, P.JOBS_VIEW_PRICING, P.PAY_VIEW_OWN, P.INVENTORY_VIEW],
   },
   casey: {
     sub: 'usr_casey',

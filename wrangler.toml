@@ -1,0 +1,20 @@
+name = "dive-schedule"
+type = "javascript"
+main = "build/server/index.js"
+compatibility_date = "2024-01-01"
+
+[env.production]
+name = "dive-schedule-prod"
+routes = [
+  { pattern = "steep-voice-6548.karpeltreeandlawn.workers.dev", zone_name = "workers.dev" }
+]
+
+[build]
+command = "npm run build"
+cwd = "."
+
+[[env.production.triggers.crons]]
+crons = ["0 0 * * *"]
+
+[env.production.vars]
+API_URL = "https://steep-voice-6548.karpeltreeandlawn.workers.dev/api"

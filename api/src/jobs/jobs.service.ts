@@ -163,7 +163,31 @@ export class JobsService {
     const safe = dto.videoUrl ? safeUrl(dto.videoUrl) : '';
     const videos = safe ? [...existingVideos, { title: 'Completion video', url: safe }] : existingVideos;
 
-    const completedAt = new Date();
+    // Allow backdating: use provided completedAt or default to now
+    let completedAt: Date;
+    if (dto.completedAt) {
+      completedAt = new Date(dto.completedAt);
+      // Validate it's a valid date
+      if (isNaN(completedAt.getTime())) {
+        throw unprocessable('completedAt must be a valid ISO 8601 datetime');
+      }
+      // Prevent future dates
+      if (completedAt > new Date()) {
+        throw unprocessable('completedAt cannot be in the future');
+      }
+      this.logger.info(
+        {
+          event: 'completion.backdated',
+          jobId: job.id,
+          completedAt: completedAt.toISOString(),
+          installationId: identity.installationId,
+        },
+        'job completion backdated',
+      );
+    } else {
+      completedAt = new Date();
+    }
+
     const note = dto.note ?? '';
     const snapshot: Job = {
       ...job,

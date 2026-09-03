@@ -48,6 +48,7 @@ export class CompleteJobDto {
   @IsOptional() @IsString() photo?: string; // image data URL
   @IsOptional() @IsString() videoUrl?: string;
   @IsOptional() @IsString() onBehalfOfUserId?: string; // requires dive.jobs.manage
+  @IsOptional() @IsString() completedAt?: string; // ISO 8601 datetime for backdating
 }
 
 export class AnswersDto {

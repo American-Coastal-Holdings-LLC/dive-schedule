@@ -6,6 +6,7 @@
 // (e.g. the bridge/API is unreachable) it shows a visible error with retry.
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
+import { setOperationTimezone } from '@/lib/format';
 import { api, ApiError } from '@/lib/api';
 import type { Me } from '@/lib/types';
 import { Icon } from './Icon';
@@ -29,6 +30,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     setError(null);
     try {
       const result = await api.get<Me>('/api/me', { quiet: true });
+      setOperationTimezone(result.timezone);
       setMe(result);
     } catch (e) {
       const message =

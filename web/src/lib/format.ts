@@ -23,6 +23,10 @@ export const money = (v: unknown): string => {
   return (n < 0 ? '-$' : '$') + s;
 };
 
+let operationTimezone='UTC';
+export function setOperationTimezone(tz:string){try{new Intl.DateTimeFormat('en',{timeZone:tz});operationTimezone=tz;}catch{operationTimezone='UTC';}}
+export function serviceDay(value:string){const p=new Intl.DateTimeFormat('en-CA',{timeZone:operationTimezone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(value));return `${p.find(x=>x.type==='year')?.value}-${p.find(x=>x.type==='month')?.value}-${p.find(x=>x.type==='day')?.value}`;}
+
 // ----- dates (verbatim) -----
 export const formatDate = (val: string | null | undefined): string => {
   if (!val) return '';
@@ -39,6 +43,7 @@ export const formatWhen = (val: string | null | undefined): string => {
   const d = new Date(val);
   if (isNaN(d.getTime())) return '';
   return d.toLocaleString('en-US', {
+    timeZone:operationTimezone,
     weekday: 'short',
     month: 'short',
     day: 'numeric',

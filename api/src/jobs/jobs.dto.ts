@@ -1,6 +1,7 @@
+import { CivilDate } from '../common/validation';
 import { Type } from 'class-transformer';
 import {
-  IsArray,
+  IsArray, IsUUID, IsInt, IsISO8601, MaxLength, ArrayMaxSize, IsEmail, ValidateIf,
   IsBoolean,
   IsIn,
   IsNumber,
@@ -27,28 +28,36 @@ export class CreateJobDto {
   @IsOptional() @IsString() site?: string;
   @IsOptional() @IsString() boat?: string;
   @IsOptional() @IsString() ownerName?: string;
-  @IsOptional() @IsString() customerEmail?: string;
+  @IsOptional() @ValidateIf((_, v) => v !== '') @IsEmail() customerEmail?: string;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) footage?: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) price?: number;
   @IsOptional() @IsIn(ROTATIONS) rotation?: string;
-  @IsOptional() @IsString() dueDate?: string;
-  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @CivilDate() dueDate?: string;
+  @IsOptional() @IsString() @MaxLength(10000) notes?: string;
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => VideoDto)
   videos?: VideoDto[];
-  @IsOptional() @IsArray() @IsString({ each: true }) assignedUserIds?: string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) assignedUserIds?: string[];
 }
 
-export class UpdateJobDto extends CreateJobDto {}
+export class UpdateJobDto extends CreateJobDto {
+  @IsISO8601() expectedUpdatedAt!: string;
+}
 
-export class CompleteJobDto {
+export class ReopenJobDto {
+  @IsUUID() requestId!: string;
+  @IsInt() @Min(0) occurrence!: number;
+}
+
+export class CompleteJobDto extends ReopenJobDto {
+  @IsOptional() @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => AnswerDto) answers?: AnswerDto[];
   @IsOptional() @IsString() note?: string;
-  @IsOptional() @IsString() photo?: string; // image data URL
+  @IsOptional() @IsString() @MaxLength(400000) photo?: string; // image data URL
   @IsOptional() @IsString() videoUrl?: string;
   @IsOptional() @IsString() onBehalfOfUserId?: string; // requires dive.jobs.manage
-  @IsOptional() @IsString() completedAt?: string; // ISO 8601 datetime for backdating
+  @IsOptional() @IsISO8601({ strict: true }) completedAt?: string; // ISO 8601 datetime for backdating
 }
 
 export class AnswersDto {

@@ -9,6 +9,7 @@ import type { CrewMember } from '@/lib/types';
 import { Avatar, EmptyState, ErrorBanner } from '../common';
 import { usePermissions } from '../PermissionsProvider';
 import { PERMISSIONS as P } from '@/lib/permissions';
+import { AddDiverModal } from '../modals/AddDiverModal';
 import { DiverModal } from '../modals/DiverModal';
 
 export function DiversTab() {
@@ -19,9 +20,12 @@ export function DiversTab() {
   const [selected, setSelected] = useState<CrewMember | null>(null);
 
   const crew = data?.crew ?? [];
+  const [adding,setAdding]=useState(false);
 
   return (
     <>
+      {canManage && <button className="btn btn-primary" onClick={()=>setAdding(true)}>Add diver</button>}
+      {adding && <AddDiverModal onClose={()=>setAdding(false)} onSaved={reload}/>}
       {error ? <ErrorBanner message="Couldn’t load the crew roster." /> : null}
 
       {crew.length === 0 && !error ? (

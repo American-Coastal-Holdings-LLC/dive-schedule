@@ -54,6 +54,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
         code = STATUS_CODE[status] || 'error';
         message = body;
       }
+    } else if ((exception as { type?: string })?.type === 'entity.too.large') {
+      status = 413; code = 'payload_too_large'; message = 'Image or request is too large. Choose a smaller image.';
     } else if (exception instanceof Error) {
       this.logger.error(exception.message, exception.stack);
     }

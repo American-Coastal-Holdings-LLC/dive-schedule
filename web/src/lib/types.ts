@@ -14,6 +14,8 @@ export interface Me {
   tenantId: string;
   installationId: string;
   permissions: string[];
+  timezone: string;
+  paymentAdmin: boolean;
 }
 
 export interface DiverRef {
@@ -34,6 +36,8 @@ export interface CheckAnswer {
 }
 
 export interface Job {
+  occurrence: number;
+  dueStatus?: {kind: string;label:string} | null;
   id: string;
   site: string;
   boat: string;
@@ -62,6 +66,7 @@ export interface Job {
 }
 
 export interface ServiceRecord {
+  videos?: JobVideo[];
   id: string;
   jobId: string;
   site: string;
@@ -81,6 +86,7 @@ export interface ServiceRecord {
   certifiedAt?: string | null;
   answers: CheckAnswer[];
   sent: boolean;
+  archived: boolean;
   sentAt?: string | null;
   sentTo: string;
   createdAt: string;

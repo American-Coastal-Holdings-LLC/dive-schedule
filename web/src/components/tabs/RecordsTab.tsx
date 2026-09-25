@@ -6,7 +6,7 @@
 import { useMemo, useState } from 'react';
 import { useResource } from '@/lib/hooks';
 import type { ServiceRecord } from '@/lib/types';
-import { formatDate } from '@/lib/format';
+import { serviceDay, formatDate } from '@/lib/format';
 import { EmptyState, ErrorBanner } from '../common';
 import { usePermissions } from '../PermissionsProvider';
 import { PERMISSIONS as P } from '@/lib/permissions';
@@ -18,13 +18,14 @@ export function RecordsTab() {
   const canManage = can(P.RECORDS_MANAGE);
   const canViewPricing = can(P.JOBS_VIEW_PRICING);
   const { data, error, reload } = useResource<{ records: ServiceRecord[] }>('/api/records');
-  const [tab, setTab] = useState<'active' | 'sent'>('active');
+  const [tab, setTab] = useState<'active' | 'sent' | 'archived'>('active');
   const [selected, setSelected] = useState<ServiceRecord | null>(null);
 
   const records = useMemo(() => data?.records ?? [], [data]);
-  const active = useMemo(() => records.filter((r) => !r.sent), [records]);
-  const sent = useMemo(() => records.filter((r) => r.sent), [records]);
-  const shown = tab === 'active' ? active : sent;
+  const active = useMemo(() => records.filter((r) => !r.sent && !r.archived), [records]);
+  const sent = useMemo(() => records.filter((r) => r.sent && !r.archived), [records]);
+  const archived=records.filter(r=>r.archived);
+  const shown = tab === 'active' ? active : tab === 'sent' ? sent : archived;
 
   return (
     <>
@@ -35,6 +36,7 @@ export function RecordsTab() {
         <button className={tab === 'sent' ? 'seg-btn active' : 'seg-btn'} onClick={() => setTab('sent')}>
           Sent <span className="seg-count">{sent.length}</span>
         </button>
+        {canManage&&<button className={tab==='archived'?'seg-btn active':'seg-btn'} onClick={()=>setTab('archived')}>Archived <span className="seg-count">{archived.length}</span></button>}
       </div>
 
       {error ? <ErrorBanner message="Couldn’t load records." /> : null}
@@ -42,11 +44,11 @@ export function RecordsTab() {
       {shown.length === 0 && !error ? (
         <EmptyState
           icon="file-text"
-          title={tab === 'active' ? 'No active records' : 'No sent records'}
+          title={tab === 'active' ? 'No active records' : tab==='sent'?'No sent records':'No archived records'}
           desc={
             tab === 'active'
               ? 'Completing a job creates a permanent service record here.'
-              : 'Records you email to customers move here.'
+              : 'Previously marked sent records remain here; opening an email draft does not confirm delivery.'
           }
         />
       ) : (
@@ -63,7 +65,7 @@ export function RecordsTab() {
                   {[r.ownerName, diver].filter(Boolean).join(' · ') || 'Service record'}
                 </div>
               </div>
-              <div className="rec-date">{formatDate(r.completedAt ? r.completedAt.slice(0, 10) : '')}</div>
+              <div className="rec-date">{formatDate(r.completedAt ? serviceDay(r.completedAt) : '')}</div>
             </button>
           );
         })

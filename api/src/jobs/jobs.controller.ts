@@ -3,7 +3,7 @@ import { CurrentIdentity } from '../auth/current-identity.decorator';
 import { Identity } from '../auth/identity';
 import { P } from '../auth/permissions';
 import { RequirePermissions } from '../auth/require-permissions.decorator';
-import { AnswersDto, CertifyDto, CompleteJobDto, CreateJobDto, UpdateJobDto } from './jobs.dto';
+import { AnswersDto, CertifyDto, CompleteJobDto, CreateJobDto, UpdateJobDto, ReopenJobDto } from './jobs.dto';
 import { JobsService } from './jobs.service';
 
 @Controller('jobs')
@@ -56,8 +56,8 @@ export class JobsController {
 
   @Post(':id/reopen')
   @RequirePermissions(P.JOBS_MANAGE)
-  reopen(@CurrentIdentity() identity: Identity, @Param('id') id: string) {
-    return this.jobs.reopen(identity, id);
+  reopen(@CurrentIdentity() identity: Identity, @Param('id') id: string, @Body() dto: ReopenJobDto) {
+    return this.jobs.reopen(identity, id, dto);
   }
 
   @Put(':id/answers')

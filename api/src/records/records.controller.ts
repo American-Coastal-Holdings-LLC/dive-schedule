@@ -33,7 +33,7 @@ export class RecordsController {
   }
 
   @Post(':id/restore')
-  @RequirePermissions(P.RECORDS_SEND)
+  @RequirePermissions(P.RECORDS_MANAGE)
   restore(@CurrentIdentity() identity: Identity, @Param('id') id: string) {
     return this.records.restore(identity, id);
   }

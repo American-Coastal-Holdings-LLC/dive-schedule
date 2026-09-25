@@ -1,0 +1,54 @@
+name: Verify Dive Schedule
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dive_test
+          POSTGRES_PASSWORD: disposable_test_only
+          POSTGRES_DB: dive_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://dive_test:disposable_test_only@localhost:5432/dive_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix api
+      - run: npm ci --prefix web
+      - run: npm run prisma:generate --prefix api
+      - run: npm run build --prefix api
+      - run: cd api && npx prisma migrate deploy
+      - run: node scripts/dev-checks/integrity.cjs
+      - name: HTTP owner payment access checks
+        env:
+          NODE_ENV: test
+          USE_DEV_IDENTITY_STUB: 'true'
+          USE_DEV_WEBHOOK_STUB: 'true'
+          USE_DEV_PLATFORM_STUBS: 'true'
+          PAYMENT_OWNER_IDS_JSON: '{"inst_demo":["usr_dana"]}'
+        run: |
+          node api/dist/main.js > /tmp/dive-api.log 2>&1 &
+          API_PID=$!
+          trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:4310/healthz && break
+            sleep 1
+          done
+          node scripts/dev-checks/payment-access.cjs
+      - run: npm run build --prefix web
+      - run: npm audit --omit=dev --prefix api
+      - run: npm audit --omit=dev --prefix web

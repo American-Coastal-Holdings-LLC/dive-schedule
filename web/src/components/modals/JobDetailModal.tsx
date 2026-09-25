@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { useResource } from '@/lib/hooks';
 import type { ChecklistQuestion, CrewMember, Job } from '@/lib/types';
-import { dueStatus, formatDate, formatWhen, isSafePhoto, money, num, rotationLabel, safeUrl } from '@/lib/format';
+import { formatDate, formatWhen, isSafePhoto, money, num, rotationLabel, safeUrl } from '@/lib/format';
 import { fileToResizedDataUrl } from '@/lib/photo';
 import { Modal } from '../Modal';
 import { Icon } from '../Icon';
@@ -67,15 +67,16 @@ export function JobDetailModal({
 
   const flushAnswers = useCallback(
     async (map: Record<string, string>) => {
-      if (!canComplete) return;
+      if (!canComplete || completed) return;
       const payload = questions.map((q) => ({ id: q.id, q: q.text, a: map[q.id] ?? '' }));
       try {
         await api.put(`/api/jobs/${job.id}/answers`, { answers: payload }, { quiet: true });
+        setSaveError('');
       } catch {
-        /* best-effort; a final flush happens before completion */
+        setSaveError('Checklist not saved. Keep this window open and retry when connected.');
       }
     },
-    [questions, job.id, canComplete],
+    [questions, job.id, canComplete, completed],
   );
 
   const onAnswerChange = (qid: string, val: string) => {
@@ -95,7 +96,7 @@ export function JobDetailModal({
   const [certified, setCertified] = useState(!!job.certified);
   useEffect(() => setCertified(!!job.certified), [job.certified]);
   const toggleCertify = async () => {
-    if (!canComplete) return;
+    if (!canComplete || completed) return;
     const next = !certified;
     setCertified(next);
     try {
@@ -108,6 +109,10 @@ export function JobDetailModal({
 
   // ----- complete flow -----
   const [cBy, setCBy] = useState(me.user.id);
+  const [completedAt,setCompletedAt]=useState('');
+  const requestId=useRef(crypto.randomUUID());
+  const reopenId=useRef(crypto.randomUUID());
+  const [saveError,setSaveError]=useState('');
   const [cNote, setCNote] = useState('');
   const [cPhoto, setCPhoto] = useState('');
   const [cVideo, setCVideo] = useState('');
@@ -128,8 +133,9 @@ export function JobDetailModal({
     setBusy(true);
     // Land any pending checklist edit first so the record snapshots the full checklist.
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    await flushAnswers(answersRef.current);
-    const body: Record<string, unknown> = { note: cNote.trim(), photo: cPhoto, videoUrl: cVideo.trim() };
+
+    const body: Record<string, unknown> = { requestId:requestId.current,occurrence:job.occurrence,answers:questions.map(q=>({id:q.id,q:q.text,a:answersRef.current[q.id]??''})),note: cNote.trim(), photo: cPhoto, videoUrl: cVideo.trim() };
+    if(completedAt && canManage)body.completedAt=new Date(completedAt).toISOString();
     if (canManage && cBy && cBy !== me.user.id) body.onBehalfOfUserId = cBy;
     try {
       await api.post(`/api/jobs/${job.id}/complete`, body);
@@ -144,7 +150,7 @@ export function JobDetailModal({
     if (busy) return;
     setBusy(true);
     try {
-      await api.post(`/api/jobs/${job.id}/reopen`);
+      await api.post(`/api/jobs/${job.id}/reopen`,{requestId:reopenId.current,occurrence:job.occurrence});
       toast('Reopened for its next rotation');
       onClose();
     } catch {
@@ -152,7 +158,7 @@ export function JobDetailModal({
     }
   };
 
-  const status = dueStatus(job.dueDate);
+  const status = job.dueStatus ?? null;
   const assignedNames = job.assignedUsers?.map((u) => u.name).filter(Boolean) ?? [];
   const title = job.boat || job.site || 'Job';
 
@@ -167,6 +173,8 @@ export function JobDetailModal({
     return (
       <Modal
         title="Complete job"
+        busy={busy}
+        dirty={!!(cNote||cPhoto||cVideo||completedAt)}
         onClose={() => setView('detail')}
         actions={
           <>
@@ -207,6 +215,8 @@ export function JobDetailModal({
           </div>
         </div>
 
+        {canManage && <><label htmlFor="cmp-date">Completion date/time (optional, your device timezone)</label><input id="cmp-date" type="datetime-local" value={completedAt} onChange={e=>setCompletedAt(e.target.value)}/></>}
+        {saveError && <p role="alert">{saveError} Your current answers will be saved with completion.</p>}
         <label htmlFor="cmp-note">Completion note</label>
         <textarea id="cmp-note" value={cNote} onChange={(e) => setCNote(e.target.value)} placeholder="Optional" />
 
@@ -243,6 +253,7 @@ export function JobDetailModal({
   return (
     <Modal
       title={title}
+      busy={busy}
       onClose={onClose}
       actions={actionButtons.length ? <>{actionButtons}</> : undefined}
     >

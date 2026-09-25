@@ -1,4 +1,5 @@
 import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
+import { PrismaService } from '../db/prisma.service';
 import { Reflector } from '@nestjs/core';
 import { unauthorized } from '../common/api-error';
 import { IDENTITY_PROVIDER, IdentityProvider } from './identity';
@@ -10,6 +11,7 @@ import { IS_PUBLIC_KEY } from './public.decorator';
 export class IdentityGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
+    private readonly prisma: PrismaService,
     @Inject(IDENTITY_PROVIDER) private readonly identityProvider: IdentityProvider,
   ) {}
 
@@ -31,6 +33,8 @@ export class IdentityGuard implements CanActivate {
     if (!identity) {
       throw unauthorized('Missing or invalid identity token');
     }
+    const installation = await this.prisma.installation.findUnique({where:{id:identity.installationId}});
+    if (installation?.status === 'uninstalled') throw unauthorized('This installation is no longer active');
     request.identity = identity;
     return true;
   }

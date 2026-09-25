@@ -1,3 +1,4 @@
+import { operation, audit } from '../db/operations';
 import { Inject, Injectable } from '@nestjs/common';
 import { Job, Prisma } from '@prisma/client';
 import { PinoLogger } from 'nestjs-pino';
@@ -10,7 +11,7 @@ import { PLATFORM_TENANT, PlatformTenantProvider } from '../platform/tenant';
 import { instantToCivil, nextDueDate } from '../domain/dates';
 import { isSafePhoto, safeUrl, serializeJob, serializeRecord } from '../domain/serialize';
 import { buildRecordData, syncableFields } from '../domain/record-builder';
-import { AnswersDto, CertifyDto, CompleteJobDto, CreateJobDto, UpdateJobDto } from './jobs.dto';
+import { AnswersDto, CertifyDto, CompleteJobDto, CreateJobDto, UpdateJobDto, ReopenJobDto } from './jobs.dto';
 import { chkKindOf, chkNormalizePercent } from '../checklist/inspection';
 
 function toArray<T = unknown>(v: unknown): T[] {
@@ -39,7 +40,8 @@ export class JobsService {
       this.directory.listUsers(installationId),
       this.tenant.getProfile(installationId),
     ]);
-    return { nameById: new Map(users.map((u) => [u.id, u.name])), tz: profile.timezone };
+    const local = await this.prisma.crewProfile.findMany({ where: { installationId, local: true, active: true } });
+    return { nameById: new Map([...users.filter(u=>u.active).map((u) => [u.id, u.name] as const), ...local.map(u => [u.userId, u.name] as const)]), tz: profile.timezone };
   }
 
   private isAssigned(job: Job, userId: string): boolean {
@@ -76,7 +78,19 @@ export class JobsService {
     return { job: serializeJob(job, { nameById, canPrice: hasPerm(identity, P.JOBS_VIEW_PRICING), tz }) };
   }
 
+  private async validateInput(identity: Identity, dto: CreateJobDto) {
+    if (dto.price !== undefined && !hasPerm(identity, P.JOBS_VIEW_PRICING)) throw forbidden('Pricing access is required to set a price');
+    if (dto.assignedUserIds) {
+      const users = await this.directory.listUsers(identity.installationId);
+      const local = await this.prisma.crewProfile.findMany({ where: { installationId: identity.installationId, local: true, active: true } });
+      const ids = new Set([...users.filter(u => u.active).map(u => u.id), ...local.map(u => u.userId)]);
+      if (new Set(dto.assignedUserIds).size !== dto.assignedUserIds.length || dto.assignedUserIds.some(id => !ids.has(id))) throw unprocessable('Assigned divers must be unique active members of this team');
+    }
+  }
+
   async create(identity: Identity, dto: CreateJobDto) {
+    if (!dto.boat?.trim() && !dto.site?.trim()) throw unprocessable('A boat or site name is required');
+    await this.validateInput(identity, dto);
     const job = await this.prisma.job.create({
       data: {
         installationId: identity.installationId,
@@ -99,6 +113,8 @@ export class JobsService {
 
   async update(identity: Identity, id: string, dto: UpdateJobDto) {
     const existing = await this.loadVisibleJob(identity, id);
+    await this.validateInput(identity, dto);
+    if (!(dto.boat ?? existing.boat).trim() && !(dto.site ?? existing.site).trim()) throw unprocessable('A boat or site name is required');
     const data: Prisma.JobUncheckedUpdateInput = {};
     if (dto.site !== undefined) data.site = dto.site;
     if (dto.boat !== undefined) data.boat = dto.boat;
@@ -111,7 +127,9 @@ export class JobsService {
     if (dto.notes !== undefined) data.notes = dto.notes;
     if (dto.videos !== undefined) data.videos = sanitizeVideos(dto.videos);
     if (dto.assignedUserIds !== undefined) data.assignedUserIds = dto.assignedUserIds;
-    const job = await this.prisma.job.update({ where: { id: existing.id }, data });
+    const changed = await this.prisma.job.updateMany({ where: { id: existing.id, installationId: identity.installationId, updatedAt: new Date(dto.expectedUpdatedAt) }, data });
+    if (!changed.count) throw conflict('This job changed. Reload before saving your edits.');
+    const job = await this.prisma.job.findUniqueOrThrow({ where: { id: existing.id } });
     const { nameById, tz } = await this.ctx(identity.installationId);
     return { job: serializeJob(job, { nameById, canPrice: hasPerm(identity, P.JOBS_VIEW_PRICING), tz }) };
   }
@@ -123,191 +141,77 @@ export class JobsService {
   }
 
   async complete(identity: Identity, id: string, dto: CompleteJobDto) {
-    const job = await this.loadVisibleJob(identity, id);
-    if (job.status === 'completed') throw conflict('Job is already completed');
+    await this.loadVisibleJob(identity, id);
     const { nameById, tz } = await this.ctx(identity.installationId);
-
-    // Attribution: completedBy is the token user, unless a jobs.manage holder
-    // records on behalf of a crew member (audit-logged).
     let completedBy = identity.userId;
     if (dto.onBehalfOfUserId && dto.onBehalfOfUserId !== identity.userId) {
-      if (!hasPerm(identity, P.JOBS_MANAGE)) {
-        throw forbidden('Recording a completion on behalf of another user requires dive.jobs.manage');
-      }
-      const member = await this.directory.getUser(identity.installationId, dto.onBehalfOfUserId);
-      if (!member) throw unprocessable('onBehalfOfUserId is not a member of this installation');
+      if (!hasPerm(identity, P.JOBS_MANAGE)) throw forbidden('Only a manager may record another diver’s work');
+      if (!nameById.has(dto.onBehalfOfUserId)) throw unprocessable('Diver is not an active team member');
       completedBy = dto.onBehalfOfUserId;
-      this.logger.info(
-        {
-          event: 'completion.on_behalf',
-          actorUserId: identity.userId,
-          onBehalfOfUserId: completedBy,
-          jobId: job.id,
-          installationId: identity.installationId,
-        },
-        'completion recorded on behalf of a crew member',
-      );
     }
-    const completedByName = nameById.get(completedBy) || completedBy;
-
-    let photo = '';
-    if (dto.photo) {
-      if (!isSafePhoto(dto.photo)) throw unprocessable('completion photo must be an image data URL');
-      photo = dto.photo;
-    }
-
-    const existingVideos = toArray<{ title?: string; url?: string }>(job.videos).map((v) => ({
-      title: String(v.title ?? ''),
-      url: String(v.url ?? ''),
-    }));
-    const safe = dto.videoUrl ? safeUrl(dto.videoUrl) : '';
-    const videos = safe ? [...existingVideos, { title: 'Completion video', url: safe }] : existingVideos;
-
-    // Allow backdating: use provided completedAt or default to now
-    let completedAt: Date;
-    if (dto.completedAt) {
-      completedAt = new Date(dto.completedAt);
-      // Validate it's a valid date
-      if (isNaN(completedAt.getTime())) {
-        throw unprocessable('completedAt must be a valid ISO 8601 datetime');
+    if (dto.completedAt && !hasPerm(identity, P.JOBS_MANAGE)) throw forbidden('Only a manager may backdate work');
+    const completedAt = dto.completedAt ? new Date(dto.completedAt) : new Date();
+    if (!Number.isFinite(completedAt.getTime()) || completedAt > new Date()) throw unprocessable('Completion time must be a valid time in the past');
+    if (dto.photo && !isSafePhoto(dto.photo)) throw unprocessable('Invalid proof image');
+    return operation(this.prisma, identity, dto.requestId, { action: 'complete', id, dto }, async tx => {
+      const job = await tx.job.findFirst({ where: { id, installationId: identity.installationId } });
+      if (!job) throw notFound('Job not found');
+      if (!hasPerm(identity, P.JOBS_VIEW_ALL) && !this.isAssigned(job, identity.userId)) throw notFound('Job not found');
+      if (job.status !== 'open' || job.occurrence !== dto.occurrence) throw conflict('This service occurrence has changed. Reload the job.');
+      const settings = await tx.installationSettings.findUnique({ where: { installationId: identity.installationId } });
+      const rate = new Prisma.Decimal(settings?.payRate ?? 0.5);
+      const videos = sanitizeVideos(toArray<{title?: string; url?: string}>(job.videos));
+      if (dto.videoUrl) {
+        const url = safeUrl(dto.videoUrl);
+        if (!url) throw unprocessable('Video link must use HTTPS or HTTP');
+        videos.push({title: 'Completion video', url});
       }
-      // Prevent future dates
-      if (completedAt > new Date()) {
-        throw unprocessable('completedAt cannot be in the future');
-      }
-      this.logger.info(
-        {
-          event: 'completion.backdated',
-          jobId: job.id,
-          completedAt: completedAt.toISOString(),
-          installationId: identity.installationId,
-        },
-        'job completion backdated',
-      );
-    } else {
-      completedAt = new Date();
-    }
-
-    const note = dto.note ?? '';
-    const snapshot: Job = {
-      ...job,
-      status: 'completed',
-      completedBy,
-      completedByName,
-      completedAt,
-      completionNote: note,
-      completionPhoto: photo,
-      videos,
-    };
-    const recordData = buildRecordData(snapshot, nameById);
-
-    const [savedJob, savedRecord] = await this.prisma.$transaction([
-      this.prisma.job.update({
-        where: { id: job.id },
-        data: {
-          status: 'completed',
-          completedBy,
-          completedByName,
-          completedAt,
-          completionNote: note,
-          completionPhoto: photo,
-          videos,
-        },
-      }),
-      this.prisma.serviceRecord.create({ data: recordData }),
-    ]);
-
-    const canPrice = hasPerm(identity, P.JOBS_VIEW_PRICING);
-    return {
-      job: serializeJob(savedJob, { nameById, canPrice, tz }),
-      record: serializeRecord(savedRecord, { canPrice }),
-    };
+      const checkAnswers = dto.answers ? dto.answers.map(a => ({ id: a.id ?? '', q: a.q ?? '', a: chkKindOf({ text: a.q ?? '' }) === 'percent' ? chkNormalizePercent(a.a ?? '') : a.a ?? '' })) : job.checkAnswers;
+      const savedJob = await tx.job.update({ where: { id }, data: {
+        status: 'completed', completedBy, completedByName: nameById.get(completedBy) ?? completedBy,
+        completedAt, completionNote: dto.note ?? '', completionPhoto: dto.photo ?? '', videos,
+        checkAnswers: checkAnswers as Prisma.InputJsonValue,
+      } });
+      const savedRecord = await tx.serviceRecord.create({ data: {
+        ...buildRecordData(savedJob, nameById), occurrence: job.occurrence,
+        payRateSnapshot: rate, payAmount: new Prisma.Decimal(job.price).mul(rate).toDecimalPlaces(2), paySource: 'completion',
+        videos,
+      } });
+      await audit(tx, identity, 'job.completed', id, { recordId: savedRecord.id, completedBy, completedAt: completedAt.toISOString(), backdated: !!dto.completedAt });
+      const canPrice = hasPerm(identity, P.JOBS_VIEW_PRICING);
+      return { job: serializeJob(savedJob, {nameById, canPrice, tz}), record: serializeRecord(savedRecord, {canPrice}) };
+    });
   }
 
-  async reopen(identity: Identity, id: string) {
-    const job = await this.loadVisibleJob(identity, id);
+  async reopen(identity: Identity, id: string, dto: ReopenJobDto) {
+    await this.loadVisibleJob(identity, id);
     const { nameById, tz } = await this.ctx(identity.installationId);
-    const lastDoneCivil = job.completedAt ? instantToCivil(job.completedAt, tz) : null;
-    const videos = toArray<{ title?: string; url?: string }>(job.videos)
-      .filter((v) => v.title !== 'Completion video')
-      .map((v) => ({ title: String(v.title ?? ''), url: String(v.url ?? '') }));
-    // Advance to the next rotation, anchored to when it was last cleaned; a job
-    // with no due date stays without one. Records persist untouched.
-    const dueDate = job.dueDate
-      ? nextDueDate(job.rotation, lastDoneCivil || job.dueDate, tz)
-      : job.dueDate;
-    const saved = await this.prisma.job.update({
-      where: { id: job.id },
-      data: {
-        status: 'open',
-        completedBy: null,
-        completedByName: null,
-        completedAt: null,
-        completionNote: '',
-        completionPhoto: '',
-        videos,
-        checkAnswers: [],
-        certified: false,
-        certifiedAt: null,
-        dueDate,
-      },
+    return operation(this.prisma, identity, dto.requestId, {action: 'reopen', id, dto}, async tx => {
+      const job = await tx.job.findFirst({where: {id, installationId: identity.installationId}});
+      if (!job) throw notFound();
+      if (job.status !== 'completed' || job.occurrence !== dto.occurrence) throw conflict('Only the current completed occurrence can be reopened');
+      const dueDate = job.dueDate ? nextDueDate(job.rotation, job.completedAt ? instantToCivil(job.completedAt, tz) : job.dueDate, tz) : '';
+      const videos = sanitizeVideos(toArray<{title?: string; url?: string}>(job.videos).filter(v => v.title !== 'Completion video'));
+      const saved = await tx.job.update({where: {id}, data: {status:'open', occurrence:{increment:1}, completedBy:null, completedByName:null,
+        completedAt:null, completionNote:'', completionPhoto:'', videos, checkAnswers:[], certified:false, certifiedAt:null, dueDate}});
+      await audit(tx, identity, 'job.next_rotation', id, {dueDate, occurrence:saved.occurrence});
+      return {job:serializeJob(saved,{nameById,canPrice:hasPerm(identity,P.JOBS_VIEW_PRICING),tz})};
     });
-    return { job: serializeJob(saved, { nameById, canPrice: hasPerm(identity, P.JOBS_VIEW_PRICING), tz }) };
   }
 
   async setAnswers(identity: Identity, id: string, dto: AnswersDto) {
     const job = await this.loadVisibleJob(identity, id);
-    // Normalise percent answers server-side. The UI renders a select, so it already sends "50%" —
-    // but the UI is not the only writer (an older client, a replayed request, or a direct API
-    // call all reach here), and this column is snapshotted verbatim into the immutable service
-    // record. A record reading "50", "50%" and "half" across three jobs is not comparable, and it
-    // cannot be fixed after the fact once the record is sent. Normalising at the boundary is the
-    // only place that holds for every writer.
-    const answers = (dto.answers || []).map((a) => {
-      const q = a.q ?? '';
-      const raw = a.a ?? '';
-      const isPercent = chkKindOf({ text: q }) === 'percent';
-      return { id: a.id ?? '', q, a: isPercent ? chkNormalizePercent(raw) : raw };
-    });
-    const saved = await this.prisma.job.update({
-      where: { id: job.id },
-      data: { checkAnswers: answers },
-    });
-    const { nameById, tz } = await this.ctx(identity.installationId);
-    if (saved.status === 'completed') await this.resyncRecord(saved, nameById);
-    return { job: serializeJob(saved, { nameById, canPrice: hasPerm(identity, P.JOBS_VIEW_PRICING), tz }) };
+    const answers = dto.answers.map(a => ({id:a.id ?? '',q:a.q ?? '',a:chkKindOf({text:a.q ?? ''}) === 'percent' ? chkNormalizePercent(a.a ?? '') : a.a ?? ''}));
+    const changed = await this.prisma.job.updateMany({where:{id,installationId:identity.installationId,status:'open',updatedAt:job.updatedAt},data:{checkAnswers:answers}});
+    if (!changed.count) throw conflict('Job changed or is completed; reopen before editing');
+    return this.getOne(identity,id);
   }
 
   async setCertify(identity: Identity, id: string, dto: CertifyDto) {
     const job = await this.loadVisibleJob(identity, id);
-    const certifiedAt = dto.certified ? job.certifiedAt ?? new Date() : null;
-    const saved = await this.prisma.job.update({
-      where: { id: job.id },
-      data: { certified: dto.certified, certifiedAt },
-    });
-    const { nameById, tz } = await this.ctx(identity.installationId);
-    if (saved.status === 'completed') await this.resyncRecord(saved, nameById);
-    return { job: serializeJob(saved, { nameById, canPrice: hasPerm(identity, P.JOBS_VIEW_PRICING), tz }) };
+    const changed = await this.prisma.job.updateMany({where:{id,installationId:identity.installationId,status:'open',updatedAt:job.updatedAt},data:{certified:dto.certified,certifiedAt:dto.certified ? new Date() : null}});
+    if (!changed.count) throw conflict('Job changed or is completed; reopen before editing');
+    return this.getOne(identity,id);
   }
 
-  // Re-sync the UNSENT record for a completed job after checklist/certify edits.
-  // Sent records are frozen; a missing record self-heals.
-  private async resyncRecord(job: Job, nameById: Map<string, string>): Promise<void> {
-    if (job.status !== 'completed') return;
-    const rec = await this.prisma.serviceRecord.findFirst({
-      where: { installationId: job.installationId, jobId: job.id, completedAt: job.completedAt },
-    });
-    if (rec) {
-      if (rec.sent) return; // sent = frozen history
-      await this.prisma.serviceRecord.update({
-        where: { id: rec.id },
-        data: {
-          ...syncableFields(job, nameById, rec.photo),
-          customerEmail: job.customerEmail || rec.customerEmail,
-        },
-      });
-    } else {
-      await this.prisma.serviceRecord.create({ data: buildRecordData(job, nameById) });
-    }
-  }
 }

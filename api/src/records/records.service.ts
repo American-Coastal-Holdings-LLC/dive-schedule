@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Job, ServiceRecord } from '@prisma/client';
-import { notFound } from '../common/api-error';
+import { notFound, conflict } from '../common/api-error';
 import { Identity, hasPerm } from '../auth/identity';
 import { P } from '../auth/permissions';
 import { PrismaService } from '../db/prisma.service';
@@ -71,20 +71,6 @@ export class RecordsService {
   async send(identity: Identity, id: string, dto: SendRecordDto) {
     const rec = await this.loadVisibleRecord(identity, id);
     const { timezone } = await this.tenant.getProfile(identity.installationId);
-    const sentAt = new Date();
-
-    // Mark sent + save the email back to the parent job (survives if job deleted).
-    await this.prisma.$transaction([
-      this.prisma.serviceRecord.update({
-        where: { id: rec.id },
-        data: { sent: true, sentAt, sentTo: dto.sentTo },
-      }),
-      this.prisma.job.updateMany({
-        where: { id: rec.jobId, installationId: identity.installationId },
-        data: { customerEmail: dto.sentTo },
-      }),
-    ]);
-
     const subject = `Dive service record — ${rec.boat || 'Service'}`;
     const body = recordText(
       {
@@ -96,7 +82,7 @@ export class RecordsService {
         completedAt: rec.completedAt,
         rotation: rec.rotation,
         footage: rec.footage,
-        price: rec.price,
+        price: hasPerm(identity, P.JOBS_VIEW_PRICING) ? rec.price : 0,
         answers: rec.answers,
         note: rec.note,
         certified: rec.certified,
@@ -106,23 +92,22 @@ export class RecordsService {
     );
     const mailto = `mailto:${dto.sentTo}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
-    const updated: ServiceRecord = { ...rec, sent: true, sentAt, sentTo: dto.sentTo };
     const canPrice = hasPerm(identity, P.JOBS_VIEW_PRICING);
-    return { record: serializeRecord(updated, { canPrice }), mailto };
+    return { record: serializeRecord(rec, { canPrice }), mailto, status: 'draft' };
   }
 
   async restore(identity: Identity, id: string) {
     const rec = await this.loadVisibleRecord(identity, id);
     const updated = await this.prisma.serviceRecord.update({
       where: { id: rec.id },
-      data: { sent: false, sentAt: null, sentTo: '' },
+      data: { archived: false },
     });
     return { record: serializeRecord(updated, { canPrice: hasPerm(identity, P.JOBS_VIEW_PRICING) }) };
   }
 
   async remove(identity: Identity, id: string) {
     const rec = await this.loadVisibleRecord(identity, id);
-    await this.prisma.serviceRecord.delete({ where: { id: rec.id } });
+    await this.prisma.serviceRecord.update({ where: { id: rec.id }, data: { archived: true } });
     return { ok: true };
   }
 }

@@ -1,3 +1,4 @@
+import { PaymentsModule } from './payments/payments.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
@@ -35,7 +36,7 @@ interface PinoReq {
         // Never log tokens or PII: only method/url/status, plus userId + installationId.
         serializers: {
           req(req: PinoReq) {
-            return { method: req.method, url: req.url };
+            return { method: req.method, url: req.url.split('?')[0].replace(/(\/client-pay\/)[^/?]+/, '$1[redacted]') };
           },
           res(res: { statusCode: number }) {
             return { statusCode: res.statusCode };
@@ -60,6 +61,7 @@ interface PinoReq {
     PayModule,
     InventoryModule,
     FinanceModule,
+    PaymentsModule,
     WebhooksModule,
   ],
   controllers: [HealthController, MeController],

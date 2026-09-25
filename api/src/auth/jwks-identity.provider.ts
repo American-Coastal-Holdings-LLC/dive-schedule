@@ -71,6 +71,7 @@ export class JwksIdentityProvider implements IdentityProvider {
       const { payload } = await jwtVerify(token, this.keys(), {
         algorithms: ALLOWED_ALGS,
         issuer: issuer(),
+        requiredClaims: ['exp','sub','aud','tenantId','pluginName'],
       });
       claims = payload as Record<string, unknown>;
     } catch (err) {
@@ -82,7 +83,7 @@ export class JwksIdentityProvider implements IdentityProvider {
       this.logger.warn('bridge token rejected: typ is not "bridge" (an access token cannot authenticate a user)');
       return null;
     }
-    if (typeof claims.pluginName === 'string' && claims.pluginName !== pluginSlug()) {
+    if (claims.pluginName !== pluginSlug()) {
       this.logger.warn('bridge token rejected: minted for a different plugin');
       return null;
     }
@@ -107,8 +108,9 @@ export class JwksIdentityProvider implements IdentityProvider {
       return null;
     }
 
-    if (!live?.active) return null;
-    if (!live.installationId || !live.userId) return null;
+    if (live?.active !== true || typeof live.installationId !== 'string' || !live.installationId || typeof live.userId !== 'string' || !live.userId || typeof live.tenantId !== 'string') return null;
+    if (claims.aud !== live.installationId || claims.sub !== live.userId || claims.tenantId !== live.tenantId) return null;
+    if (!Array.isArray(live.permissions) || live.permissions.some(p => typeof p !== 'string')) return null;
 
     return {
       userId: live.userId,

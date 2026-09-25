@@ -14,6 +14,7 @@ import { ChecksTab } from './tabs/ChecksTab';
 import { PayTab } from './tabs/PayTab';
 import { DiversTab } from './tabs/DiversTab';
 import { SalesTab } from './tabs/SalesTab';
+import { PaymentSetupTab } from './tabs/PaymentSetupTab';
 import { StockTab } from './tabs/StockTab';
 
 interface TabDef {
@@ -35,7 +36,7 @@ const TABS: TabDef[] = [
 
 export function Shell() {
   const { me, can, hasAny } = usePermissions();
-  const visibleTabs = useMemo(() => TABS.filter((t) => t.visible({ can, hasAny })), [can, hasAny]);
+  const visibleTabs = useMemo(() => [...TABS.filter((t) => t.visible({ can, hasAny })), ...(me.paymentAdmin ? [{key:'payment-setup',label:'Owner setup',visible:()=>true,Comp:PaymentSetupTab}] : [])], [can, hasAny, me.paymentAdmin]);
   const [active, setActive] = useState<string>(() => visibleTabs[0]?.key ?? 'jobs');
 
   // A directory that returned PII-nulled fields gives us the user id back as the "name". Detect

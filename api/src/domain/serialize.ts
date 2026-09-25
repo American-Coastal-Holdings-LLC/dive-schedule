@@ -51,6 +51,7 @@ export function serializeJob(job: Job, opts: SerializeJobOpts): Record<string, u
   const assignedIds = asArray<string>(job.assignedUserIds).filter((x) => typeof x === 'string');
   const out: Record<string, unknown> = {
     id: job.id,
+    occurrence: job.occurrence,
     site: job.site,
     boat: job.boat,
     ownerName: job.ownerName,
@@ -91,6 +92,7 @@ export function serializeRecord(
   const out: Record<string, unknown> = {
     id: rec.id,
     jobId: rec.jobId,
+    videos: asArray(rec.videos),
     site: rec.site,
     boat: rec.boat,
     ownerName: rec.ownerName,

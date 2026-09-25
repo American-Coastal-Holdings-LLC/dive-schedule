@@ -1,11 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { CrewProfile } from '@prisma/client';
-import { notFound, unprocessable } from '../common/api-error';
+import { notFound, unprocessable, conflict } from '../common/api-error';
 import { Identity } from '../auth/identity';
 import { PrismaService } from '../db/prisma.service';
 import { PLATFORM_DIRECTORY, PlatformDirectory } from '../platform/directory';
 import { isSafePhoto } from '../domain/serialize';
-import { UpdateCrewDto } from './crew.dto';
+import { UpdateCrewDto, CreateCrewDto } from './crew.dto';
 
 // Crew roster = platform user identity (id/name/active) merged with this app's
 // occupational crew-profile extension (certs/bio/photo/joined).
@@ -34,12 +35,27 @@ export class CrewService {
         joined: p?.joined ?? '',
       };
     });
-    return { crew };
+    for (const p of profiles.filter(p => p.local)) crew.push({id:p.userId,name:p.name,active:p.active,certifications:p.certifications,bio:p.bio,photo:p.photo,joined:p.joined});
+    return { crew: crew.map(c => ({...c, email: byId.get(c.id)?.email ?? '', loginEnabled: !byId.get(c.id)?.local})) };
+  }
+
+  async create(identity: Identity, dto: CreateCrewDto) {
+    const name = dto.name.trim(), email = dto.email.trim().toLowerCase();
+    if (!name) throw unprocessable('Diver name is required');
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${identity.installationId}, 0))`;
+      const existing = await tx.crewProfile.findFirst({where:{installationId:identity.installationId,email}});
+      if (existing) throw conflict('A diver with this email is already on your team');
+      const diver = await tx.crewProfile.create({data:{installationId:identity.installationId,userId:`crew_${randomUUID()}`,name,email,local:true,certifications:dto.certifications ?? '',joined:new Date().toISOString().slice(0,10)}});
+      await tx.auditEvent.create({data:{installationId:identity.installationId,actorId:identity.userId,action:'crew.created',targetId:diver.userId}});
+      return {crewMember:{id:diver.userId,name,email,active:true,loginEnabled:false,certifications:diver.certifications,bio:'',photo:'',joined:diver.joined}};
+    });
   }
 
   async update(identity: Identity, userId: string, dto: UpdateCrewDto) {
     const member = await this.directory.getUser(identity.installationId, userId);
-    if (!member) throw notFound('Crew member not found');
+    const local = await this.prisma.crewProfile.findUnique({where:{installationId_userId:{installationId:identity.installationId,userId}}});
+    if (!member && !local?.local) throw notFound('Crew member not found');
     if (dto.photo && !isSafePhoto(dto.photo)) {
       throw unprocessable('photo must be an image data URL');
     }
@@ -63,9 +79,9 @@ export class CrewService {
     });
     return {
       crewMember: {
-        id: member.id,
-        name: member.name,
-        active: member.active,
+        id: member?.id ?? userId,
+        name: member?.name ?? local?.name,
+        active: member?.active ?? local?.active,
         certifications: profile.certifications,
         bio: profile.bio,
         photo: profile.photo,

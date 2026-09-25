@@ -48,8 +48,9 @@ export class PayService {
     const payRate = settings ? num(settings.payRate) : 0.5;
 
     const users = await this.directory.listUsers(identity.installationId);
+    const local = await this.prisma.crewProfile.findUnique({where:{installationId_userId:{installationId:identity.installationId,userId:targetUserId}}});
     const targetName =
-      new Map(users.map((u) => [u.id, u.name])).get(targetUserId) || targetUserId;
+      new Map(users.map((u) => [u.id, u.name])).get(targetUserId) || local?.name || targetUserId;
 
     const [records, jobs] = await Promise.all([
       this.prisma.serviceRecord.findMany({ where: { installationId: identity.installationId } }),
@@ -66,11 +67,11 @@ export class PayService {
     let weekTotal = 0;
     let totalFeet = 0;
 
-    const addJob = (civil: string | null, price: number, feet: number, site: string) => {
+    const addJob = (civil: string | null, price: number, feet: number, site: string, snapshot?: number) => {
       if (!civil || civil < start || civil >= endExcl) return;
       const idx = idxByDate.get(civil);
       if (idx === undefined) return;
-      const earning = (price > 0 ? price : 0) * payRate;
+      const earning = snapshot ?? Math.round((price > 0 ? price : 0) * payRate * 100) / 100;
       days[idx].jobs.push({ site, earning, feet });
       days[idx].total += earning;
       days[idx].feet += feet;
@@ -85,7 +86,7 @@ export class PayService {
         (r.completedBy && r.completedBy === targetUserId) ||
         (!r.completedBy && targetName && r.completedByName === targetName);
       if (!mine) continue;
-      addJob(instantToCivil(r.completedAt, tz), num(r.price), num(r.footage), r.site);
+      addJob(instantToCivil(r.completedAt, tz), num(r.price), num(r.footage), r.site, r.payAmount === null ? undefined : num(r.payAmount));
     }
     for (const t of jobs) {
       if (t.completedBy !== targetUserId) continue;

@@ -8,7 +8,7 @@
 import { useMemo, useState } from 'react';
 import { useResource } from '@/lib/hooks';
 import type { Job } from '@/lib/types';
-import { dueStatus, formatDate, money, num } from '@/lib/format';
+import { serviceDay, formatDate, money, num } from '@/lib/format';
 import { EmptyState, ErrorBanner, Fab } from '../common';
 import { Icon } from '../Icon';
 import { usePermissions } from '../PermissionsProvider';
@@ -36,7 +36,7 @@ function JobCard({
   onOpen: () => void;
 }) {
   const completed = job.status === 'completed';
-  const status = dueStatus(job.dueDate);
+  const status = job.dueStatus ?? null;
   const assigned = job.assignedUsers?.length ?? job.assignedUserIds?.length ?? 0;
   const title = job.boat || job.site || 'Job';
   return (
@@ -64,7 +64,7 @@ function JobCard({
         {completed ? (
           <span className="chip done">
             <Icon name="check-circle" />
-            Completed{job.completedAt ? ` ${formatDate(job.completedAt.slice(0, 10))}` : ''}
+            Completed{job.completedAt ? ` ${formatDate(serviceDay(job.completedAt))}` : ''}
           </span>
         ) : status ? (
           <span className={`chip ${status.kind}`}>
@@ -122,7 +122,7 @@ export function JobsTab() {
   const groups =
     tab === 'unfinished'
       ? groupByDay(unfinished, (j) => j.dueDate)
-      : groupByDay(finished, (j) => (j.completedAt ? j.completedAt.slice(0, 10) : ''));
+      : groupByDay(finished, (j) => (j.completedAt ? serviceDay(j.completedAt) : ''));
 
   const dayLabel = (day: string) =>
     day ? formatDate(day) : tab === 'unfinished' ? 'Unscheduled' : 'Date unknown';

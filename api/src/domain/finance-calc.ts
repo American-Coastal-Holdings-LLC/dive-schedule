@@ -20,11 +20,13 @@ export interface Totals {
   in: number;
   out: number;
   net: number;
+  serviceValue: number;
 }
 
 export function totalsSince(cutoff: string, now: string, ctx: FinanceContext): Totals {
   let inSum = 0;
   let outSum = 0;
+  let serviceValue = 0;
 
   for (const l of ctx.ledger) {
     const c = l.date;
@@ -41,7 +43,7 @@ export function totalsSince(cutoff: string, now: string, ctx: FinanceContext): T
     if (!(price > 0)) continue;
     const c = instantToCivil(r.completedAt, ctx.tz);
     if (!c || c < cutoff || c > now) continue;
-    inSum += price;
+    serviceValue += price;
   }
 
   for (const t of ctx.jobs) {
@@ -51,8 +53,8 @@ export function totalsSince(cutoff: string, now: string, ctx: FinanceContext): T
     if (!(price > 0)) continue;
     const c = instantToCivil(t.completedAt, ctx.tz) || t.dueDate;
     if (!c || c < cutoff || c > now) continue;
-    inSum += price;
+    serviceValue += price;
   }
 
-  return { in: inSum, out: outSum, net: inSum - outSum };
+  return { in: inSum, out: outSum, net: inSum - outSum, serviceValue };
 }

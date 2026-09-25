@@ -74,6 +74,7 @@ export function JobFormModal({
     if (busy) return;
     setBusy(true);
     const body: Record<string, unknown> = {
+      ...(job ? {expectedUpdatedAt:job.updatedAt} : {}),
       site: site.trim(),
       boat: boat.trim(),
       ownerName: ownerName.trim(),
@@ -117,6 +118,8 @@ export function JobFormModal({
     <Modal
       title={editing ? 'Edit boat' : 'Add boat'}
       onClose={onClose}
+      busy={busy}
+      dirty={true}
       actions={
         <>
           {editing ? (

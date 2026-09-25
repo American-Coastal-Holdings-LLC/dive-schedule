@@ -47,7 +47,8 @@ export class WebhooksController {
     // a tenant's data NOT being erased on uninstall — a deletion-obligation miss, not a cosmetic
     // one. Accepting both is the only version of this that cannot silently fail.
     if (event === 'installation.deleted' || event === 'installation.uninstalled') {
-      if (installationId) await this.tenancy.deleteInstallation(installationId);
+      if (!installationId || !headers['x-eos-webhook-id']) throw unauthorized('Missing installation or delivery identifier');
+      await this.tenancy.deleteInstallation(installationId, headers['x-eos-webhook-id']);
       this.logger.warn({ event, installationId }, 'installation deletion processed — data deleted');
       return { ok: true, event, deleted: Boolean(installationId) };
     }

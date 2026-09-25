@@ -36,6 +36,10 @@ model InstallationSettings {
 model CrewProfile {
   installationId String
   userId         String
+  name           String @default("")
+  email          String @default("")
+  local          Boolean @default(false)
+  active         Boolean @default(true)
   certifications String @default("")
   bio            String @default("")
   photo          String @default("") // data:image/... or ""
@@ -56,6 +60,7 @@ model Job {
   price          Decimal   @default(0)
   rotation       String    @default("weekly") // weekly | biweekly | monthly | bimonthly
   dueDate        String    @default("") // YYYY-MM-DD
+  occurrence     Int       @default(0)
   status         String    @default("open") // open | completed
   notes          String    @default("")
   videos         Json      @default("[]") // [{ title, url }]
@@ -79,6 +84,11 @@ model ServiceRecord {
   id              String    @id @default(cuid())
   installationId  String
   jobId           String
+  occurrence      Int?
+  payRateSnapshot Decimal?
+  payAmount       Decimal?
+  paySource       String @default("legacy")
+  videos          Json @default("[]")
   site            String    @default("")
   boat            String    @default("")
   ownerName       String    @default("")
@@ -95,12 +105,15 @@ model ServiceRecord {
   certified       Boolean   @default(false)
   certifiedAt     DateTime?
   answers         Json      @default("[]") // [{ q, a }]
+  archived        Boolean   @default(false)
   sent            Boolean   @default(false)
   sentAt          DateTime?
   sentTo          String    @default("")
   createdAt       DateTime  @default(now())
 
   @@index([installationId])
+  @@index([installationId, completedAt])
+  @@unique([installationId, jobId, occurrence])
   @@index([installationId, jobId])
   @@index([installationId, sent])
 }
@@ -141,4 +154,68 @@ model LedgerEntry {
 
   @@index([installationId])
   @@index([installationId, date])
+}
+
+model OperationReceipt {
+  installationId String
+  key String
+  fingerprint String
+  result Json
+  createdAt DateTime @default(now())
+  @@id([installationId, key])
+}
+
+model AuditEvent {
+  id String @id @default(cuid())
+  installationId String
+  actorId String
+  action String
+  targetId String
+  detail Json @default("{}")
+  createdAt DateTime @default(now())
+  @@index([installationId, createdAt])
+}
+
+model WebhookDelivery {
+  id String @id
+  createdAt DateTime @default(now())
+}
+
+model ClientPayment {
+  id String @id @default(cuid())
+  installationId String
+  recordId String
+  amountCents Int
+  currency String @default("usd")
+  stripeAccount String
+  publicToken String? @unique
+  provider String @default("unselected")
+  paypalOrderId String? @unique
+  paypalCaptureId String? @unique
+  sessionId String? @unique
+  checkoutUrl String?
+  paymentIntentId String?
+  status String @default("pending")
+  refundedCents Int @default(0)
+  attempt Int @default(0)
+  policyVersion String
+  createdAt DateTime @default(now())
+  paidAt DateTime?
+  @@unique([installationId, recordId])
+  @@index([installationId, status])
+}
+
+model MerchantSettings {
+  installationId String @id
+  config Json @default("{}")
+  paypalSealed String?
+  updatedAt DateTime @updatedAt
+}
+
+model PaymentSetupState {
+  hash String @id
+  installationId String
+  ownerId String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 }

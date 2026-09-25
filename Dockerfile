@@ -20,15 +20,16 @@
 # No secrets are baked in anywhere: everything is env at runtime, from /opt/vendor/.env.
 
 # ---- deps: install both workspaces' dependencies against their own lockfiles ----
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 COPY api/package.json api/package-lock.json* ./api/
 COPY web/package.json web/package-lock.json* ./web/
+COPY vendor/eos-plugin-devkit/packages/bridge-client ./vendor/eos-plugin-devkit/packages/bridge-client
 RUN cd api && npm ci
 RUN cd web && npm ci
 
 # ---- build: prisma generate + nest build + next build ----
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 
 # Build-time public config. NEXT_PUBLIC_* is INLINED into the client bundle at build time, so it
@@ -56,7 +57,7 @@ RUN cd api && npx prisma generate && npm run build
 RUN cd web && npm run build
 
 # ---- runtime: slim image carrying only what actually serves ----
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 

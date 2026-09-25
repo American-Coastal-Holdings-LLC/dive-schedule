@@ -18,9 +18,10 @@ export function useResource<T>(path: string | null): Resource<T> {
   const [data, setData] = useState<T | undefined>(undefined);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState<boolean>(path !== null);
-  const alive = useRef(true);
+  const generation = useRef(0);
 
   const load = useCallback(async () => {
+    const request = ++generation.current;
     if (path === null) {
       setData(undefined);
       setError(null);
@@ -30,24 +31,24 @@ export function useResource<T>(path: string | null): Resource<T> {
     setLoading(true);
     try {
       const result = await api.get<T>(path, { quiet: true });
-      if (!alive.current) return;
+      if (generation.current !== request) return;
       setData(result);
       setError(null);
     } catch (e) {
-      if (!alive.current) return;
+      if (generation.current !== request) return;
       setError(e instanceof ApiError ? e : new ApiError(0, 'error', 'Something went wrong.'));
     } finally {
-      if (alive.current) setLoading(false);
+      if (generation.current === request) setLoading(false);
     }
   }, [path]);
 
   useEffect(() => {
-    alive.current = true;
+
     load();
     const onFocus = () => load();
     window.addEventListener('focus', onFocus);
     return () => {
-      alive.current = false;
+      generation.current++;
       window.removeEventListener('focus', onFocus);
     };
   }, [load]);

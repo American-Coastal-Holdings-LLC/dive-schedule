@@ -25,6 +25,8 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   async rewrites() {
     return [
+      { source: '/healthz', destination: `${API_URL}/healthz` },
+      { source: '/api/healthz', destination: `${API_URL}/healthz` },
       { source: '/api/:path*', destination: `${API_URL}/api/:path*` },
       { source: '/webhooks/:path*', destination: `${API_URL}/webhooks/:path*` },
     ];
@@ -39,7 +41,7 @@ const nextConfig: NextConfig = {
         // headers). The bare `/api` and `/webhooks` paths fall through and get this header too; that is
         // benign (JSON/404 responses, not framable, and multiple CSP headers intersect, not conflict).
         source: '/((?!api/|webhooks/).*)',
-        headers: [{ key: 'Content-Security-Policy', value: `frame-ancestors ${FRAME_ANCESTORS}` }],
+        headers: [{ key: 'Content-Security-Policy', value: `frame-ancestors ${FRAME_ANCESTORS}` }, {key:'Referrer-Policy',value:'no-referrer'}],
       },
     ];
   },

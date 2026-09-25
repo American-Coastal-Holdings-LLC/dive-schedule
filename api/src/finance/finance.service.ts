@@ -1,3 +1,5 @@
+import { Prisma } from '@prisma/client';
+import { operation, audit } from '../db/operations';
 import { Inject, Injectable } from '@nestjs/common';
 import { InstallationSettings } from '@prisma/client';
 import { notFound, unprocessable } from '../common/api-error';
@@ -97,55 +99,43 @@ export class FinanceService {
       where: { id, installationId: identity.installationId },
     });
     if (!existing) throw notFound('Ledger entry not found');
-    await this.prisma.ledgerEntry.delete({ where: { id: existing.id } });
+    if (['Stripe payment','Stripe refund','Venmo','POS · Cash'].includes(existing.category)) throw unprocessable('Payment and sale entries cannot be deleted; record a documented refund or correction');
+    await this.prisma.$transaction(async tx=>{
+      await audit(tx,identity,'ledger.deleted',existing.id,JSON.parse(JSON.stringify(existing)));
+      await tx.ledgerEntry.delete({where:{id:existing.id}});
+    });
     return { ok: true };
   }
 
   // POS sale (cash only): one ledger "in" entry + stock decrements, single transaction.
   async posSale(identity: Identity, dto: PosSaleDto) {
-    if (dto.method !== 'cash') throw unprocessable('Only cash sales are supported');
-    const lines = dto.lines || [];
-    if (!lines.length) throw unprocessable('At least one line item is required');
-
     const { timezone: tz } = await this.tenant.getProfile(identity.installationId);
-    let total = 0;
-    const descParts: string[] = [];
-    for (const ln of lines) {
-      const amount = num(ln.amount);
-      const qty = Math.max(1, Math.floor(num(ln.qty) || 1));
-      total += amount * qty;
-      descParts.push(`${qty}× ${ln.name || 'Item'}`);
-    }
-
-    const entry = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.ledgerEntry.create({
-        data: {
-          installationId: identity.installationId,
-          kind: 'in',
-          amount: total,
-          description: descParts.join(', ') || 'POS sale',
-          category: 'POS · Cash',
-          date: todayCivil(tz),
-        },
-      });
-      for (const ln of lines) {
-        if (!ln.itemId) continue;
-        const item = await tx.inventoryItem.findFirst({
-          where: { id: ln.itemId, installationId: identity.installationId },
-        });
-        if (!item) continue;
-        const qty = Math.max(1, Math.floor(num(ln.qty) || 1));
-        await tx.inventoryItem.update({
-          where: { id: item.id },
-          data: { quantity: Math.max(0, item.quantity - qty) },
-        });
+    return operation(this.prisma, identity, dto.requestId, {action:'sale', dto}, async tx => {
+      let total = new Prisma.Decimal(0);
+      const sold: {itemId?:string; name:string; amount:number; qty:number}[] = [];
+      for (const line of dto.lines) {
+        const qty = line.qty ?? 1;
+        if (!Number.isInteger(qty) || qty < 1) throw unprocessable('Quantity must be a positive whole number');
+        let price = new Prisma.Decimal(line.amount);
+        let name = line.name || 'Custom item';
+        if (line.itemId) {
+          const item = await tx.inventoryItem.findFirst({where:{id:line.itemId,installationId:identity.installationId}});
+          if (!item) throw unprocessable('An item no longer exists; refresh the sale');
+          if (item.quantity < qty) throw unprocessable(`Only ${item.quantity} of ${item.name} in stock`);
+          price = new Prisma.Decimal(item.salePrice); name = item.name;
+          const changed = await tx.inventoryItem.updateMany({where:{id:item.id,installationId:identity.installationId,quantity:{gte:qty}},data:{quantity:{decrement:qty}}});
+          if (!changed.count) throw unprocessable('Stock changed; refresh the sale');
+        }
+        if (!price.isFinite() || price.lte(0)) throw unprocessable('Each item must have a positive price');
+        price = price.toDecimalPlaces(2);
+        total = total.add(price.mul(qty));
+        sold.push({itemId:line.itemId,name,amount:price.toNumber(),qty});
       }
-      return created;
+      if (!sold.length || !Number.isFinite(dto.received) || new Prisma.Decimal(dto.received).lt(total)) throw unprocessable('Cash received must cover the total');
+      const entry = await tx.ledgerEntry.create({data:{installationId:identity.installationId,kind:'in',amount:total,description:sold.map(l=>`${l.qty}× ${l.name}`).join(', '),category:'POS · Cash',date:todayCivil(tz)}});
+      await audit(tx,identity,'pos.sale',entry.id,JSON.parse(JSON.stringify({lines:sold,received:dto.received,total:total.toNumber()})));
+      return {entry:serializeLedger(entry),total:total.toNumber(),received:dto.received,change:new Prisma.Decimal(dto.received).sub(total).toDecimalPlaces(2).toNumber()};
     });
-
-    const received = dto.received != null ? num(dto.received) : null;
-    const change = received != null ? Math.max(0, received - total) : null;
-    return { entry: serializeLedger(entry), total, received, change };
   }
 
   async settingsGet(identity: Identity) {
@@ -209,6 +199,9 @@ export class FinanceService {
       exportedAt: new Date().toISOString(),
       operation: { name: profile.operationName, contactEmail: profile.contactEmail, timezone: tz },
       settings: this.serializeSettings(settings),
+      audit: canPrice ? await this.prisma.auditEvent.findMany({where:{installationId:identity.installationId}}) : [],
+      payments: canPrice ? (await this.prisma.clientPayment.findMany({where:{installationId:identity.installationId}})).map(({publicToken,checkoutUrl,...p})=>p) : [],
+      earningSnapshots: canPrice ? records.map(r=>({id:r.id,payAmount:r.payAmount,payRateSnapshot:r.payRateSnapshot,paySource:r.paySource,archived:r.archived})) : [],
       jobs: jobs.map((j) => serializeJob(j, { nameById, canPrice, tz })),
       records: records.map((r) => serializeRecord(r, { canPrice })),
       checklist: checklist.map((q) => ({ id: q.id, text: q.text, ord: q.ord })),
@@ -216,7 +209,8 @@ export class FinanceService {
       ledger: ledger.map(serializeLedger),
       crew: crewProfiles.map((p) => ({
         userId: p.userId,
-        name: nameById.get(p.userId) ?? null,
+        name: nameById.get(p.userId) ?? p.name,
+        email: p.email, local: p.local, active: p.active,
         certifications: p.certifications,
         bio: p.bio,
         photo: p.photo,

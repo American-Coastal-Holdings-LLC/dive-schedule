@@ -49,5 +49,8 @@ export async function fileToResizedDataUrl(
   const ctx = canvas.getContext('2d');
   if (!ctx) return dataUrl;
   ctx.drawImage(img, 0, 0, width, height);
-  return canvas.toDataURL('image/jpeg', quality);
+  let encoded=canvas.toDataURL('image/jpeg',quality);
+  for(let q=quality-0.1;encoded.length>350000&&q>=0.2;q-=0.1)encoded=canvas.toDataURL('image/jpeg',q);
+  if(encoded.length>350000)throw new Error('Image is too large. Choose a smaller photo.');
+  return encoded;
 }

@@ -5,6 +5,7 @@
 // uses the print CSS scoped to #recordModal; Copy writes recordText to the clipboard. Restore
 // (records.send) and Delete (records.manage) are gated. Sent records are frozen server-side.
 
+import { PaymentActions } from '../PaymentActions';
 import { useState } from 'react';
 import { api } from '@/lib/api';
 import type { ServiceRecord } from '@/lib/types';
@@ -58,7 +59,7 @@ export function RecordModal({
         a.click();
         a.remove();
       }
-      toast('Report sent to customer');
+      toast('Email draft opened — send it from your mail app.');
       onChanged();
       onClose();
     } catch {
@@ -71,7 +72,7 @@ export function RecordModal({
     setBusy(true);
     try {
       await api.post(`/api/records/${record.id}/restore`);
-      toast('Moved back to Active');
+      toast('Record restored');
       onChanged();
       onClose();
     } catch {
@@ -84,7 +85,7 @@ export function RecordModal({
     setBusy(true);
     try {
       await api.del(`/api/records/${record.id}`);
-      toast('Record deleted');
+      toast('Record archived; earnings and history retained');
       onChanged();
       onClose();
     } catch {
@@ -119,15 +120,15 @@ export function RecordModal({
           <button className="icon-btn" aria-label="Copy" onClick={copy}>
             <Icon name="copy" />
           </button>
-          {record.sent ? (
-            canSend ? (
+          {record.archived ? (
+            canManage ? (
               <button className="btn btn-secondary" onClick={restore} disabled={busy}>
                 <Icon name="rotate-ccw" /> Restore
               </button>
             ) : null
           ) : null}
-          {canManage ? (
-            <button className="icon-btn danger" aria-label="Delete record" onClick={del} disabled={busy}>
+          {canManage && !record.archived ? (
+            <button className="icon-btn danger" aria-label="Archive record" onClick={del} disabled={busy}>
               <Icon name="trash" />
             </button>
           ) : null}
@@ -152,7 +153,7 @@ export function RecordModal({
           </div>
           <div className="send-hint">
             <Icon name="info" />
-            <span>Opens your mail app with the report ready to send, and files this record under Sent.</span>
+            <span>Opens your mail app with the report ready to send, The record stays active; opening a draft does not confirm delivery.</span>
           </div>
         </div>
       ) : null}
@@ -167,6 +168,7 @@ export function RecordModal({
         </div>
       ) : null}
 
+      <PaymentActions recordId={record.id}/>
       <div className="rec-doc-head">
         <div className="rec-doc-title">Dive service record</div>
         <div className="rec-doc-sub">{head}</div>
@@ -210,6 +212,7 @@ export function RecordModal({
         </div>
       ) : null}
 
+      {record.videos?.length ? <section><h3>Service videos</h3>{record.videos.map((v,i)=><p key={i}><a href={v.url} target="_blank" rel="noopener noreferrer">{v.title || "Video"}</a></p>)}</section> : null}
       {isSafePhoto(record.photo) ? (
         <div className="dl" style={{ marginTop: 16 }}>
           <div className="k">Proof photo</div>

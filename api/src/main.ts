@@ -3,6 +3,7 @@ import 'reflect-metadata';
 import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
@@ -13,7 +14,9 @@ async function bootstrap(): Promise<void> {
   // re-serialized body would fail on any whitespace or key-order difference — and would accept a
   // reordered payload carrying a stale signature. This flag is load-bearing security, not a tuning
   // knob; removing it makes HmacWebhookVerifier reject every delivery.
-  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true, rawBody: true });
+
+  app.useBodyParser('json', { limit: '512kb' });
 
   // Route Nest logging through pino.
   app.useLogger(app.get(Logger));
@@ -38,6 +41,7 @@ async function bootstrap(): Promise<void> {
     exclude: [
       { path: 'healthz', method: RequestMethod.GET },
       { path: 'webhooks/platform', method: RequestMethod.POST },
+      { path: 'webhooks/stripe', method: RequestMethod.POST },
     ],
   });
 
@@ -54,7 +58,7 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new AllExceptionsFilter());
 
   const port = parseInt(process.env.PORT || '4310', 10);
-  await app.listen(port);
+  await app.listen(port, process.env.API_HOST || '127.0.0.1');
   app.get(Logger).log(`Dive Schedule API listening on http://localhost:${port}`, 'Bootstrap');
 }
 

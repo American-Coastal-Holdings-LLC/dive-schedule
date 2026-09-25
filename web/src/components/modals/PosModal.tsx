@@ -4,7 +4,7 @@
 // cash, show change, and POST /api/pos/sale (one ledger "in" entry + stock decrements server-side).
 // Venmo / QR from the seed are intentionally dropped.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef } from 'react';
 import { api } from '@/lib/api';
 import { useResource } from '@/lib/hooks';
 import type { InventoryItem, PosLine } from '@/lib/types';
@@ -24,6 +24,7 @@ export function PosModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   const [desc, setDesc] = useState('');
   const [received, setReceived] = useState('');
   const [busy, setBusy] = useState(false);
+  const requestId = useRef(crypto.randomUUID());
 
   const total = useMemo(() => lines.reduce((s, l) => s + num(l.amount) * num(l.qty), 0), [lines]);
   const change = num(received) - total;
@@ -58,12 +59,13 @@ export function PosModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
       if (lines.length === 0) toast('Add at least one line.');
       return;
     }
+    if (!received || num(received) < total) { toast('Cash received must cover the total.'); return; }
     setBusy(true);
     try {
       await api.post('/api/pos/sale', {
         lines: lines.map((l) => ({ itemId: l.itemId, name: l.name, amount: num(l.amount), qty: num(l.qty) })),
-        method: 'cash',
-        received: num(received) || undefined,
+        method: 'cash', requestId: requestId.current,
+        received: num(received),
       });
       toast(`Sale recorded — ${money(total)}`);
       onSaved();

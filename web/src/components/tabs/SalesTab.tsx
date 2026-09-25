@@ -86,7 +86,7 @@ function StatGrid({ title, period }: { title: string; period?: { in: unknown; ou
           <div className="val out">{money(num(period?.out))}</div>
         </div>
         <div className="stat">
-          <div className="lbl">Net</div>
+          <div className="lbl">Cash balance</div>
           <div className={net < 0 ? 'val net neg' : 'val net'}>{money(net)}</div>
         </div>
       </div>
@@ -102,7 +102,7 @@ export function SalesTab() {
   const canFinanceManage = can(P.FINANCE_MANAGE);
   const canSettings = can(P.SETTINGS_MANAGE);
 
-  const settings = useResource<Settings>(canFinance || canSettings ? '/api/settings' : null);
+  const settings = useResource<{ settings: Settings }>(canFinance || canSettings ? '/api/settings' : null);
   const summary = useResource<FinanceSummary>(canFinance ? '/api/finance/summary' : null);
   const ledger = useResource<{ entries: LedgerEntry[] }>(canFinance ? '/api/ledger' : null);
 
@@ -110,8 +110,8 @@ export function SalesTab() {
   const [addLedger, setAddLedger] = useState(false);
   const [estLength, setEstLength] = useState('');
 
-  const rate = num(settings.data?.estimateRatePerFoot);
-  const payRate = num(settings.data?.payRate);
+  const rate = num(settings.data?.settings.estimateRatePerFoot);
+  const payRate = num(settings.data?.settings.payRate);
   const estPrice = rate * num(estLength);
   const estCrew = estPrice * payRate;
 
@@ -196,7 +196,7 @@ export function SalesTab() {
       {/* Revenue report */}
       {canFinance ? (
         <div className="sales-section">
-          <div className="sales-h">Revenue</div>
+          <div className="sales-h">Cash ledger</div><p>Payments and manual cash entries only. Completed service value is not cash collected. Crew estimates are not recorded expenses until entered.</p>
           {summary.error ? <ErrorBanner message="Couldn’t load the revenue report." /> : null}
           <div className="report-card">
             <div className="rc-title">
